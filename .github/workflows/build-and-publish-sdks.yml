@@ -32,7 +32,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       ############################################
-      # REACT SDK BUILD (SAFE VERSION)
+      # REACT SDK BUILD (robust, safe)
       ############################################
 
       - name: Setup Node.js
@@ -44,23 +44,33 @@ jobs:
         run: |
           set -e
 
+          echo "Cleaning build directories..."
+          rm -rf artifacts/react
+          rm -rf .ci-react-build
           mkdir -p artifacts/react
           mkdir -p .ci-react-build
+
+          echo "Initializing temporary npm project..."
           cd .ci-react-build
+          npm init -y || { echo "npm init failed"; exit 1; }
 
-          npm init -y > /dev/null 2>&1
-          npm install typescript esbuild > /dev/null 2>&1
+          echo "Installing build dependencies..."
+          npm install typescript esbuild || { echo "npm install failed"; exit 1; }
 
+          echo "Running esbuild..."
           npx esbuild ../react/AppFigReactSDK.ts \
             --bundle \
             --minify \
             --platform=neutral \
             --format=esm \
-            --outfile=../artifacts/react/AppFigReactSDK.min.js
+            --outfile=../artifacts/react/AppFigReactSDK.min.js \
+            || { echo "esbuild failed"; exit 1; }
 
-          # write index.d.ts with no heredoc
+          echo "Creating index.d.ts..."
           echo "declare const AppFig: any;" > ../artifacts/react/index.d.ts
           echo "export default AppFig;" >> ../artifacts/react/index.d.ts
+
+          echo "React build completed."
 
       ############################################
       # UNITY / IOS / ANDROID (temporary copies)
@@ -70,6 +80,7 @@ jobs:
         run: |
           set -e
 
+          rm -rf artifacts/unity artifacts/ios artifacts/android
           mkdir -p artifacts/unity
           mkdir -p artifacts/ios
           mkdir -p artifacts/android
@@ -95,10 +106,8 @@ jobs:
           set -e
           cd public-repo
 
-          # delete everything except .git
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
-          # recreate structure
           mkdir -p unity react ios android
 
           cp -R ../artifacts/unity/* unity/
@@ -111,7 +120,7 @@ jobs:
           if [ ! -f README.md ]; then
             echo "AppFig SDKs" > README.md
             echo "" >> README.md
-            echo "This repository is auto-generated from the private AppFig-SDKs-private repo." >> README.md
+            echo "This repository is auto-generated from the private AppFig-SDKs-private repository." >> README.md
             echo "It contains packaged SDK artifacts for Unity, React, iOS, and Android." >> README.md
             echo "Do not edit this repository manually." >> README.md
           fi
