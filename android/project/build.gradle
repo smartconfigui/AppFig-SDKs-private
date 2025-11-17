@@ -27,7 +27,6 @@ android {
         pickFirst "**/*.kotlin_module"
     }
 
-    // Kotlin JVM target
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -38,35 +37,24 @@ repositories {
     mavenCentral()
 }
 
-//
-// --- FAT AAR CONFIG ------------------------------------------------------
-// Everything added to `embed` will be physically packed INSIDE the AAR
-//
 configurations {
     embed
     implementation.extendsFrom(embed)
 }
 
 dependencies {
-    // Dependencies to embed inside AAR
     embed "com.squareup.okhttp3:okhttp:4.12.0"
     embed "com.google.code.gson:gson:2.10.1"
 
-    // Kotlin standard library
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 }
 
-//
-// --- MERGE EMBEDDED DEPENDENCIES INTO THE AAR -----------------------------
-// Ensures OkHttp & Gson jars are included physically in the final AAR
-//
 afterEvaluate {
     tasks.withType(com.android.build.gradle.tasks.BundleAar).configureEach { task ->
         task.doLast {
             def outDir = task.archiveFile.get().asFile.parentFile
             def aarFile = task.archiveFile.get().asFile
 
-            // Unzip AAR into temp directory
             def tempDir = new File(outDir, "tempAar")
             if (tempDir.exists()) tempDir.deleteDir()
             tempDir.mkdirs()
@@ -76,7 +64,6 @@ afterEvaluate {
                 into tempDir
             }
 
-            // Copy embedded jars into /libs inside AAR
             def libsDir = new File(tempDir, "libs")
             libsDir.mkdirs()
 
@@ -84,15 +71,4 @@ afterEvaluate {
                 if (!file.isDirectory()) {
                     copy {
                         from file
-                        into libsDir
-                    }
-                }
-            }
-
-            // Repack AAR with embedded libs
-            aarFile.delete()
-            ant.zip(destfile: aarFile, basedir: tempDir)
-            tempDir.deleteDir()
-        }
-    }
-}
+                        into li
