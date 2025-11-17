@@ -87,16 +87,13 @@ jobs:
             -output AppFig.xcframework
           cp -R AppFig.xcframework ../../artifacts/ios/
 
-      # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-      # ADD ZIP CREATION HERE — ONLY CHANGE REQUESTED
-      # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+      # ZIP the XCFramework (NEW)
       - name: Zip iOS XCFramework
         run: |
           set -e
           cd ios/AppFig
           zip -r AppFig.xcframework.zip AppFig.xcframework
           cp AppFig.xcframework.zip ../../artifacts/ios/
-      # <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
 
       ###########################################################
       # 3. UNITY — COPY ALL FILES BEGINNING WITH AppFig*
@@ -116,11 +113,11 @@ jobs:
 
           cp -v unity/AppFig* artifacts/unity/
 
-          echo "Unity artifacts copied:"
+          echo "Unity artifacts:"
           ls -lh artifacts/unity
 
       ###########################################################
-      # 4. REACT SDK BUILD (TRANSFORM + BUNDLE + MINIFY)
+      # 4. REACT SDK — Option B (AppFigReactSDK.js + .d.ts)
       ###########################################################
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -137,22 +134,24 @@ jobs:
           npm init -y
           npm install esbuild typescript
 
+          # Output JS with final name
           npx esbuild ../react/AppFigReactSDK.ts \
             --bundle \
             --minify \
             --platform=neutral \
             --format=esm \
-            --outfile=../artifacts/react/AppFigReactSDK.min.js
+            --outfile=../artifacts/react/AppFigReactSDK.js
 
-          echo "declare const AppFig: any;" > ../artifacts/react/index.d.ts
-          echo "export default AppFig;" >> ../artifacts/react/index.d.ts
+          # Same-name type definition
+          echo "declare const AppFig: any;" > ../artifacts/react/AppFigReactSDK.d.ts
+          echo "export default AppFig;" >> ../artifacts/react/AppFigReactSDK.d.ts
 
       ###########################################################
       # 5. CLONE PUBLIC REPO
       ###########################################################
       - name: Clone public repo
         run: |
-            git clone https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/${{ env.PUBLIC_REPO }}.git public-repo
+          git clone https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/${{ env.PUBLIC_REPO }}.git public-repo
 
       ###########################################################
       # 6. PUBLISH ARTIFACTS
@@ -163,10 +162,12 @@ jobs:
           cd public-repo
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
           mkdir -p android ios unity react
+
           cp -R ../artifacts/android/* android/
           cp -R ../artifacts/ios/* ios/
           cp -R ../artifacts/unity/* unity/
           cp -R ../artifacts/react/* react/
+
           echo "AppFig SDKs" > README.md
           echo "Auto-generated SDK artifacts." >> README.md
 
