@@ -27,7 +27,7 @@ android {
         pickFirst "**/*.kotlin_module"
     }
 
-    // Required for Kotlin 17 toolchain consistency
+    // Kotlin JVM target
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -39,8 +39,8 @@ repositories {
 }
 
 //
-// --- F A T   A A R   C O N F I G -----------------------------
-// Everything added to `embed` will be packed INSIDE the AAR
+// --- FAT AAR CONFIG ------------------------------------------------------
+// Everything added to `embed` will be physically packed INSIDE the AAR
 //
 configurations {
     embed
@@ -48,17 +48,17 @@ configurations {
 }
 
 dependencies {
-    // SDK code dependencies (will be embedded inside AAR)
+    // Dependencies to embed inside AAR
     embed "com.squareup.okhttp3:okhttp:4.12.0"
     embed "com.google.code.gson:gson:2.10.1"
 
-    // For your Kotlin SDK code
+    // Kotlin standard library
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 }
 
 //
-// --- MERGE EMBEDDED JARS INTO THE AAR -------------------------
-// Ensures OkHttp & Gson jars are physically included inside AAR
+// --- MERGE EMBEDDED DEPENDENCIES INTO THE AAR -----------------------------
+// Ensures OkHttp & Gson jars are included physically in the final AAR
 //
 afterEvaluate {
     tasks.withType(com.android.build.gradle.tasks.BundleAar).configureEach { task ->
@@ -66,27 +66,30 @@ afterEvaluate {
             def outDir = task.archiveFile.get().asFile.parentFile
             def aarFile = task.archiveFile.get().asFile
 
-            // Unzip AAR into temp dir
+            // Unzip AAR into temp directory
             def tempDir = new File(outDir, "tempAar")
             if (tempDir.exists()) tempDir.deleteDir()
             tempDir.mkdirs()
+
             copy {
                 from zipTree(aarFile)
                 into tempDir
             }
 
             // Copy embedded jars into /libs inside AAR
-            new File(tempDir, "libs").mkdirs()
+            def libsDir = new File(tempDir, "libs")
+            libsDir.mkdirs()
+
             configurations.embed.each { file ->
                 if (!file.isDirectory()) {
                     copy {
                         from file
-                        into new File(tempDir, "libs")
+                        into libsDir
                     }
                 }
             }
 
-            // Repack AAR
+            // Repack AAR with embedded libs
             aarFile.delete()
             ant.zip(destfile: aarFile, basedir: tempDir)
             tempDir.deleteDir()
