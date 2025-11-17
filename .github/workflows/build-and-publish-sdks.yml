@@ -24,7 +24,7 @@ jobs:
           mkdir -p artifacts/android artifacts/ios artifacts/unity artifacts/react
 
       ###########################################################
-      # 1. ANDROID AAR BUILD (ANDROID FIRST)
+      # 1. ANDROID AAR BUILD
       ###########################################################
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -38,18 +38,12 @@ jobs:
           cd android/project
           chmod +x ./gradlew
           ./gradlew clean assembleRelease
-
-          echo "Searching for .aar output..."
           AAR=$(find build -name "*.aar" | head -n 1)
-
           if [ -z "$AAR" ]; then
             echo "ERROR: No AAR found."
-            echo "Listing build folder:"
             find build -type f
             exit 1
           fi
-
-          echo "Found AAR: $AAR"
           cp "$AAR" ../../artifacts/android/AppFigAndroidSDK.aar
 
       ###########################################################
@@ -91,11 +85,10 @@ jobs:
             -framework build/ios_devices.xcarchive/Products/Library/Frameworks/AppFig.framework \
             -framework build/ios_simulator.xcarchive/Products/Library/Frameworks/AppFig.framework \
             -output AppFig.xcframework
-
           cp -R AppFig.xcframework ../../artifacts/ios/
 
       ###########################################################
-      # 3. UNITY (COPY DLL)
+      # 3. UNITY DLL COPY
       ###########################################################
       - name: Copy Unity DLL
         run: |
@@ -107,12 +100,32 @@ jobs:
           cp unity/AppFigUnitySDK.dll artifacts/unity/
 
       ###########################################################
-      # 4. REACT (COPY TS FILE)
+      # 4. REACT SDK BUILD (TRANSFORM + BUNDLE + MINIFY)
       ###########################################################
-      - name: Copy React SDK
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Build React SDK
         run: |
           set -e
-          cp react/AppFigReactSDK.ts artifacts/react/
+          rm -rf react-build
+          mkdir react-build
+
+          cd react-build
+          npm init -y
+          npm install esbuild typescript
+
+          npx esbuild ../react/AppFigReactSDK.ts \
+            --bundle \
+            --minify \
+            --platform=neutral \
+            --format=esm \
+            --outfile=../artifacts/react/AppFigReactSDK.min.js
+
+          echo "declare const AppFig: any;" > ../artifacts/react/index.d.ts
+          echo "export default AppFig;" >> ../artifacts/react/index.d.ts
 
       ###########################################################
       # 5. CLONE PUBLIC REPO
@@ -128,28 +141,21 @@ jobs:
         run: |
           set -e
           cd public-repo
-
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
-
           mkdir -p android ios unity react
-
           cp -R ../artifacts/android/* android/
           cp -R ../artifacts/ios/* ios/
           cp -R ../artifacts/unity/* unity/
           cp -R ../artifacts/react/* react/
-
           echo "AppFig SDKs" > README.md
-          echo "" >> README.md
-          echo "Auto-generated SDK artifacts from AppFig-SDKs-private." >> README.md
+          echo "Auto-generated SDK artifacts." >> README.md
 
       - name: Commit & Push
         run: |
           set -e
           cd public-repo
-
           git config user.name "AppFig SDK Bot"
           git config user.email "sdk-bot@appfig.com"
-
           git add .
           if git diff --cached --quiet; then
             echo "No changes to publish."
