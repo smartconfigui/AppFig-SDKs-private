@@ -1,4 +1,4 @@
-name: Build and Publish SDKs
+name: Build and Publish AppFig SDKs
 
 on:
   workflow_dispatch:
@@ -6,31 +6,68 @@ on:
     branches:
       - main
 
+env:
+  PUBLIC_REPO: AppFig/AppFig-SDKs
+  PUBLIC_BRANCH: main
+
 jobs:
   build:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout private repo
         uses: actions/checkout@v4
 
-      # ============================
-      # 1. iOS BUILD (.xcframework)
-      # ============================
-      - name: Build iOS SwiftPM XCFramework
-        working-directory: ios
+      - name: Prepare artifacts folder
+        run: |
+          rm -rf artifacts
+          mkdir -p artifacts/ios artifacts/android artifacts/unity artifacts/react
+
+      ###########################################################
+      # 1. iOS XCFRAMEWORK BUILD
+      ###########################################################
+      - name: Build iOS XCFramework (device)
         run: |
           set -e
-          swift build -c release --product AppFig
-          mkdir -p ../dist/ios
-          swift package compute-checksum Sources/AppFig/AppFigiOSSDK.swift > ../dist/ios/checksum.txt
-          xcodebuild -create-xcframework \
-            -framework .build/apple/Products/Release/AppFig.framework \
-            -output ../dist/ios/AppFig.xcframework
+          cd ios/AppFig
+          xcodebuild \
+            -project AppFig.xcodeproj \
+            -scheme AppFig \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/ios_devices.xcarchive \
+            SKIP_INSTALL=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            archive
 
-      # ============================
-      # 2. Android BUILD (AAR)
-      # ============================
+      - name: Build iOS XCFramework (simulator)
+        run: |
+          set -e
+          cd ios/AppFig
+          xcodebuild \
+            -project AppFig.xcodeproj \
+            -scheme AppFig \
+            -sdk iphonesimulator \
+            -configuration Release \
+            -archivePath build/ios_simulator.xcarchive \
+            SKIP_INSTALL=NO \
+            BUILD_LIBRARY_FOR_DISTRIBUTION=YES \
+            archive
+
+      - name: Create XCFramework
+        run: |
+          set -e
+          cd ios/AppFig
+          xcodebuild -create-xcframework \
+            -framework build/ios_devices.xcarchive/Products/Library/Frameworks/AppFig.framework \
+            -framework build/ios_simulator.xcarchive/Products/Library/Frameworks/AppFig.framework \
+            -output AppFig.xcframework
+
+          cp -R AppFig.xcframework ../../artifacts/ios/
+
+      ###########################################################
+      # 2. ANDROID AAR BUILD
+      ###########################################################
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
@@ -38,37 +75,76 @@ jobs:
           java-version: "17"
 
       - name: Build Android AAR
-        working-directory: android/project
         run: |
           set -e
+          cd android/project
           chmod +x ./gradlew
           ./gradlew clean assembleRelease
-          mkdir -p ../../dist/android
-          cp ./build/outputs/aar/project-release.aar ../../dist/android/AppFigAndroidSDK.aar
 
-      # ============================
-      # 3. Unity BUILD (copy DLL)
-      # ============================
+          AAR="build/outputs/aar/project-release.aar"
+          if [ ! -f "$AAR" ]; then
+            echo "AAR not found"; exit 1;
+          fi
+
+          cp "$AAR" ../../artifacts/android/AppFigAndroidSDK.aar
+
+      ###########################################################
+      # 3. UNITY (COPY DLL)
+      ###########################################################
       - name: Copy Unity DLL
         run: |
-          mkdir -p dist/unity
-          cp unity/AppFigUnitySDK.dll dist/unity/
+          set -e
+          if [ ! -f unity/AppFigUnitySDK.dll ]; then
+            echo "ERROR: unity/AppFigUnitySDK.dll not found"; exit 1;
+          fi
+          cp unity/AppFigUnitySDK.dll artifacts/unity/
 
-      # ============================
-      # 4. React (single-file)
-      # ============================
-      - name: Build React SDK
-        working-directory: react
+      ###########################################################
+      # 4. REACT (COPY RAW TS SDK)
+      ###########################################################
+      - name: Copy React SDK
         run: |
           set -e
-          mkdir -p ../dist/react
-          cp AppFigReactSDK.ts ../dist/react/AppFigReactSDK.ts
+          cp react/AppFigReactSDK.ts artifacts/react/
 
-      # ============================
-      # 5. Upload artifacts
-      # ============================
-      - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: appfig-sdks
-          path: dist/
+      ###########################################################
+      # 5. CLONE PUBLIC REPO
+      ###########################################################
+      - name: Clone public repo
+        run: |
+          git clone https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/${{ env.PUBLIC_REPO }}.git public-repo
+
+      ###########################################################
+      # 6. PUBLISH ARTIFACTS
+      ###########################################################
+      - name: Replace contents
+        run: |
+          set -e
+          cd public-repo
+
+          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
+
+          mkdir -p ios android unity react
+
+          cp -R ../artifacts/ios/* ios/
+          cp -R ../artifacts/android/* android/
+          cp -R ../artifacts/unity/* unity/
+          cp -R ../artifacts/react/* react/
+
+          echo "AppFig SDKs" > README.md
+          echo "" >> README.md
+          echo "Auto-published artifacts from AppFig-SDKs-private." >> README.md
+
+      - name: Commit and push
+        run: |
+          cd public-repo
+          git config user.name "AppFig SDK Bot"
+          git config user.email "sdk-bot@appfig.com"
+
+          git add .
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Publish latest AppFig SDK build"
+            git push origin ${{ env.PUBLIC_BRANCH }}
+          fi

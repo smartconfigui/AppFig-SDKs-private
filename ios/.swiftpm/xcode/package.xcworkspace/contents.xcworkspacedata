@@ -2,6 +2,9 @@
 <Workspace
    version = "1.0">
    <FileRef
+      location = "absolute:/Users/alpcanutku/Documents/AppFig-SDKs-private/ios/AppFig/AppFig.xcodeproj">
+   </FileRef>
+   <FileRef
       location = "self:">
    </FileRef>
 </Workspace>
