@@ -1,22 +1,16 @@
-// swift-tools-version:5.7
+// swift-tools-version: 5.9
 import PackageDescription
 
 let package = Package(
     name: "AppFig",
-    platforms: [
-        .iOS(.v13)
-    ],
+    platforms: [.iOS(.v13)],
     products: [
-        .library(
-            name: "AppFig",
-            targets: ["AppFig"]
-        )
+        .library(name: "AppFig", targets: ["AppFig"])
     ],
     targets: [
         .target(
             name: "AppFig",
-            path: ".",
-            sources: ["../AppFigiOSSDK.swift"]
+            path: "Sources/AppFig"
         )
     ]
 )
