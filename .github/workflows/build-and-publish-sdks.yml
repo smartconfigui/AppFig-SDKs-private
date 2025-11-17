@@ -1,198 +1,183 @@
-name: Build and publish AppFig SDKs
+name: Build & Publish SDKs
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
-    paths:
-      - "unity/**"
-      - "react/**"
-      - "ios/**"
-      - "android/**"
-      - "VERSION"
-      - ".github/workflows/build-and-publish-sdks.yml"
-
-env:
-  PUBLIC_REPO: AppFig/AppFig-SDKs
-  PUBLIC_REPO_BRANCH: main
 
 jobs:
   build-and-publish:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout private repo
-        uses: actions/checkout@v4
+      - name: Checkout private repository
+        uses: actions/checkout@v3
 
-      - name: Read version
-        id: version
-        run: |
-          VERSION=$(cat VERSION | tr -d '[:space:]')
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Set up JDK
+        uses: actions/setup-java@v3
+        with:
+          distribution: temurin
+          java-version: 17
 
-      #######################################################
-      # REACT BUILD (TS → bundled + minified JS)
-      #######################################################
-
-      - name: Setup Node
+      - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: 20
 
-      - name: Build React SDK
+      - name: Install Swift toolchain
         run: |
-          set -e
-          rm -rf artifacts/react
-          rm -rf ci-react-build
+          swift --version
+
+      - name: Prepare artifacts folder
+        run: |
+          mkdir -p artifacts/android
+          mkdir -p artifacts/ios
           mkdir -p artifacts/react
-          mkdir -p ci-react-build
-
-          cd ci-react-build
-          npm init -y
-          npm install esbuild typescript
-
-          npx esbuild ../react/AppFigReactSDK.ts \
-            --bundle \
-            --minify \
-            --platform=neutral \
-            --format=esm \
-            --outfile=../artifacts/react/AppFigReactSDK.min.js
-
-          echo "declare const AppFig: any;" > ../artifacts/react/index.d.ts
-          echo "export default AppFig;" >> ../artifacts/react/index.d.ts
-
-      #######################################################
-      # UNITY DLL — COPY ONLY
-      #######################################################
-
-      - name: Prepare Unity DLL artifact
-        run: |
-          set -e
-          rm -rf artifacts/unity
           mkdir -p artifacts/unity
 
-          DLL="unity/AppFigUnitySDK.dll"
-          if [ ! -f "$DLL" ]; then
-            echo "ERROR: unity/AppFigUnitySDK.dll not found. Upload your DLL to unity/ first."
-            exit 1
-          fi
-
-          cp "$DLL" artifacts/unity/AppFigUnitySDK.dll
-
       #######################################################
-      # ANDROID BUILD (Kotlin → AAR)
+      # ANDROID BUILD (.aar)
       #######################################################
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
       - name: Build Android AAR
         run: |
           set -e
-          rm -rf artifacts/android
-          mkdir -p artifacts/android
-
           cd android/project
-          ./gradlew assembleRelease
 
-          AAR_FILE=$(find build/outputs/aar -name "*release.aar" | head -n 1)
+          # Apply toolchain fix & namespace fix dynamically
+          sed -i '' 's/compileSdkVersion 33/compileSdkVersion 34/' build.gradle
+          sed -i '' 's/targetSdkVersion 33/targetSdkVersion 34/' build.gradle
 
-          if [ -z "$AAR_FILE" ]; then
-            echo "Android AAR not found in build/outputs/aar"
-            ls -R build/outputs/aar
+          # Remove AndroidManifest package warning
+          sed -i '' 's/package="com.appfig.sdk"//' src/main/AndroidManifest.xml
+
+          # Force JVM toolchain to 17
+          cat >> build.gradle <<EOF
+
+android {
+    namespace "com.appfig.sdk"
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+}
+EOF
+
+          ./gradlew clean assembleRelease --warning-mode all
+
+          AAR_PATH=$(find build/outputs/aar -name "*.aar" | head -n 1)
+          if [ -z "$AAR_PATH" ]; then
+            echo "Android AAR not found"
             exit 1
           fi
 
-          echo "Found AAR: $AAR_FILE"
-          cp "$AAR_FILE" ../../artifacts/android/appfig-release.aar
+          cp "$AAR_PATH" ../../artifacts/android/AppFigAndroidSDK.aar
+
 
       #######################################################
       # iOS BUILD (SwiftPM → XCFramework)
       #######################################################
+      - name: Prepare SwiftPM Project
+        run: |
+          set -e
+          rm -rf ios/build
+          mkdir -p ios/build/Sources/AppFig
+
+          # Move all SDK Swift files into SwiftPM folder
+          cp ios/*.swift ios/build/Sources/AppFig/
+
+          # Create Package.swift
+          cat > ios/build/Package.swift << 'EOF'
+          // swift-tools-version:5.7
+          import PackageDescription
+
+          let package = Package(
+              name: "AppFig",
+              platforms: [.iOS(.v13)],
+              products: [
+                  .library(name: "AppFig", targets: ["AppFig"])
+              ],
+              targets: [
+                  .target(name: "AppFig", path: "Sources/AppFig")
+              ]
+          )
+          EOF
 
       - name: Build iOS XCFramework
         run: |
           set -e
-          rm -rf artifacts/ios
-          mkdir -p artifacts/ios
+          rm -rf artifacts/ios/*
+          cd ios/build
 
-          cd ios/project
           swift build -c release
 
-          PRODUCT=".build/apple/Products/Release/AppFig.framework"
-          if [ ! -d "$PRODUCT" ]; then
-            echo "Swift build failed (AppFig.framework not found)"
+          FRAMEWORK_PATH=$(find .build -type d -name "AppFig.framework" | head -n 1)
+          if [ -z "$FRAMEWORK_PATH" ]; then
+            echo "AppFig.framework not found"
+            find .build -type d -maxdepth 5
             exit 1
           fi
 
           xcodebuild -create-xcframework \
-            -framework "$PRODUCT" \
+            -framework "$FRAMEWORK_PATH" \
             -output AppFig.xcframework
 
           cp -R AppFig.xcframework ../../artifacts/ios/
 
+
       #######################################################
-      # PUBLISH ARTIFACTS TO PUBLIC REPO
+      # REACT SDK BUILD
       #######################################################
-
-      - name: Clone public repo
+      - name: Build React SDK
         run: |
           set -e
-          git clone \
-            https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/${{ env.PUBLIC_REPO }}.git \
-            public-repo
+          cd react
 
-      - name: Replace public repo contents
+          rm -rf dist
+          npm install
+          npm run build
+
+          cp -R dist ../artifacts/react/
+
+
+      #######################################################
+      # UNITY SDK (DLL COPY)
+      #######################################################
+      - name: Copy Unity DLL
         run: |
           set -e
-          cd public-repo
+          cp unity/*.dll artifacts/unity/
 
-          find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
-          mkdir -p unity react ios android
+      #######################################################
+      # PUBLISH TO PUBLIC SDK REPO
+      #######################################################
+      - name: Checkout public repo
+        uses: actions/checkout@v3
+        with:
+          repository: smartconfigui/AppFig-SDKs-public
+          token: ${{ secrets.GH_PAT }}
+          path: public
 
-          cp -R ../artifacts/unity/* unity/
-          cp -R ../artifacts/react/* react/
-          cp -R ../artifacts/ios/* ios/
-          cp -R ../artifacts/android/* android/
-
-          echo "${{ steps.version.outputs.version }}" > VERSION
-
-          echo "AppFig SDKs" > README.md
-          echo "" >> README.md
-          echo "Auto-generated from AppFig-SDKs-private." >> README.md
-          echo "Contains packaged SDK artifacts for Unity, React, iOS, and Android." >> README.md
-          echo "Do not edit manually." >> README.md
-
-      - name: Commit and push artifacts
+      - name: Sync Artifacts to Public Repo
         run: |
           set -e
-          cd public-repo
+          rm -rf public/android public/ios public/react public/unity
 
-          git config user.name "AppFig SDK Bot"
-          git config user.email "sdk-bot@appfig.com"
+          mkdir -p public/android public/ios public/react public/unity
 
+          cp artifacts/android/* public/android/
+          cp -R artifacts/ios/* public/ios/
+          cp -R artifacts/react/* public/react/
+          cp artifacts/unity/* public/unity/
+
+      - name: Commit & Push
+        run: |
+          cd public
+          git config user.email "actions@github.com"
+          git config user.name "GitHub Actions"
           git add .
-          if git diff --cached --quiet; then
-            echo "No changes to commit."
-          else
-            git commit -m "Publish SDK artifacts v${{ steps.version.outputs.version }}"
-            git push origin ${{ env.PUBLIC_REPO_BRANCH }}
-          fi
-
-      - name: Tag public repo
-        run: |
-          set -e
-          cd public-repo
-          VERSION="${{ steps.version.outputs.version }}"
-
-          if git rev-parse "v$VERSION" >/dev/null 2>&1; then
-            git tag -d "v$VERSION"
-          fi
-
-          git tag "v$VERSION"
-          git push origin "v$VERSION" --force
+          git commit -m "SDK Build $(date)" || echo "No changes"
+          git push
