@@ -22,13 +22,12 @@ android {
         consumerProguardFiles "consumer-rules.pro"
     }
 
-    // FIX: Required to avoid JVM mismatch error in AGP 8+
+    // Java 17 to match Kotlin 1.9 / AGP 8
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
 
-    // Kotlin JVM target
     kotlinOptions {
         jvmTarget = "17"
     }
@@ -52,66 +51,11 @@ repositories {
     mavenCentral()
 }
 
-//
-// ------- FAT AAR CONFIG --------------------------------------
-// All dependencies added to 'embed' will be physically included
-// inside the final .aar (OkHttp + Gson included)
-// --------------------------------------------------------------
-configurations {
-    embed
-    implementation.extendsFrom(embed)
-}
-
+// NO FAT-AAR CONFIG HERE – JUST NORMAL DEPS
 dependencies {
-    // Embedded dependencies — will go INSIDE the AAR
-    embed "com.squareup.okhttp3:okhttp:4.12.0"
-    embed "com.google.code.gson:gson:2.10.1"
+    // SDK dependencies (NOT embedded, app will provide these)
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
+    implementation "com.google.code.gson:gson:2.10.1"
 
-    // Kotlin runtime
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
-}
-
-//
-// ------- MERGE EMBEDDED JARS INTO AAR -------------------------
-// This makes a REAL fat AAR including OkHttp + Gson jars
-// --------------------------------------------------------------
-afterEvaluate {
-    tasks.withType(com.android.build.gradle.tasks.BundleAar).configureEach { task ->
-        task.doLast {
-            def outDir = task.archiveFile.get().asFile.parentFile
-            def aarFile = task.archiveFile.get().asFile
-
-            // Temporary output directory
-            def tempDir = new File(outDir, "tempAar")
-            if (tempDir.exists()) tempDir.deleteDir()
-            tempDir.mkdirs()
-
-            // unpack AAR
-            copy {
-                from zipTree(aarFile)
-                into tempDir
-            }
-
-            // create libs/ folder inside AAR structure
-            def libsDir = new File(tempDir, "libs")
-            libsDir.mkdirs()
-
-            // copy embed jars into libs/
-            configurations.embed.each { file ->
-                if (!file.isDirectory()) {
-                    copy {
-                        from file
-                        into libsDir
-                    }
-                }
-            }
-
-            // recreate AAR with embedded jars
-            aarFile.delete()
-            ant.zip(destfile: aarFile, basedir: tempDir)
-
-            // cleanup
-            tempDir.deleteDir()
-        }
-    }
 }
