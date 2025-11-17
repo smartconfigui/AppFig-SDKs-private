@@ -32,7 +32,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       #######################################################
-      # REACT SDK BUILD (TS → bundled/minified JS)
+      # REACT BUILD (TS → minified JS)
       #######################################################
 
       - name: Setup Node
@@ -63,31 +63,25 @@ jobs:
           echo "export default AppFig;" >> ../artifacts/react/index.d.ts
 
       #######################################################
-      # UNITY BUILD (.cs → .dll using dotnet)
+      # UNITY SDK — COPY DLL YOU PROVIDE
       #######################################################
 
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Build Unity DLL
+      - name: Prepare Unity DLL artifact
         run: |
           set -e
           rm -rf artifacts/unity
           mkdir -p artifacts/unity
 
-          dotnet build unity/project/AppFigUnitySDK.csproj -c Release
-
-          OUT="unity/project/bin/Release/netstandard2.0/AppFig.dll"
-          if [ ! -f "$OUT" ]; then
-            echo "Unity DLL not found"; exit 1;
+          DLL="unity/AppFig.dll"
+          if [ ! -f "$DLL" ]; then
+            echo "ERROR: unity/AppFig.dll not found. Upload a compiled DLL to unity/ first."
+            exit 1
           fi
 
-          cp "$OUT" artifacts/unity/AppFig.dll
+          cp "$DLL" artifacts/unity/AppFig.dll
 
       #######################################################
-      # ANDROID BUILD (Kotlin → AAR with Gradle)
+      # ANDROID BUILD (Kotlin → AAR)
       #######################################################
 
       - name: Setup Java
@@ -123,7 +117,6 @@ jobs:
           mkdir -p artifacts/ios
 
           cd ios/project
-
           swift build -c release
 
           PRODUCT=".build/apple/Products/Release/AppFig.framework"
@@ -138,7 +131,7 @@ jobs:
           cp -R AppFig.xcframework ../../artifacts/ios/
 
       #######################################################
-      # CLONE PUBLIC REPO AND REPLACE CONTENTS
+      # PUBLISH ARTIFACTS TO PUBLIC REPO
       #######################################################
 
       - name: Clone public repo
