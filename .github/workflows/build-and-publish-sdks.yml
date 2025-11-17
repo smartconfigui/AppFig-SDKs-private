@@ -88,16 +88,25 @@ jobs:
           cp -R AppFig.xcframework ../../artifacts/ios/
 
       ###########################################################
-      # 3. UNITY DLL COPY
+      # 3. UNITY — COPY ALL FILES BEGINNING WITH AppFig*
       ###########################################################
-      - name: Copy Unity DLL
+      - name: Copy Unity SDK files
         run: |
           set -e
-          if [ ! -f unity/AppFigUnitySDK.dll ]; then
-            echo "ERROR: unity/AppFigUnitySDK.dll not found"
+          echo "Copying all Unity files starting with AppFig* ..."
+          mkdir -p artifacts/unity
+          
+          FOUND=$(ls unity/AppFig* 2>/dev/null | wc -l | tr -d ' ')
+          if [ "$FOUND" = "0" ]; then
+            echo "ERROR: No files starting with AppFig* found under /unity"
+            ls -R unity
             exit 1
           fi
-          cp unity/AppFigUnitySDK.dll artifacts/unity/
+
+          cp -v unity/AppFig* artifacts/unity/
+
+          echo "Unity artifacts copied:"
+          ls -lh artifacts/unity
 
       ###########################################################
       # 4. REACT SDK BUILD (TRANSFORM + BUNDLE + MINIFY)

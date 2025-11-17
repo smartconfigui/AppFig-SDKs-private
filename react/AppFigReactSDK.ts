@@ -370,7 +370,12 @@ class AppFigCore {
     // Notify listeners if value changed
     if (oldValue !== newValue) {
       this.log('DEBUG', `Feature value changed after reset: ${featureName} = ${newValue}`);
-      this.notifyListeners(new Set([featureName]));
+
+      // Notify feature listeners
+      const listeners = this.featureListeners.get(featureName);
+      if (listeners) {
+        listeners.forEach(callback => callback(featureName, newValue));
+      }
     } else {
       this.log('DEBUG', `Feature value unchanged after reset: ${featureName} = ${newValue}`);
     }
@@ -1203,7 +1208,7 @@ class AppFigCore {
       if (document.hidden && this.sessionActive) {
         this.endSession();
       } else if (!document.hidden && !this.sessionActive) {
-        this.log('[AppFig] 📱 App foregrounded, starting session');
+        this.log('INFO', '📱 App foregrounded, starting session');
         this.logEvent('session_start');
         this.sessionActive = true;
         this.lastActivity = Date.now();
@@ -1215,7 +1220,7 @@ class AppFigCore {
 
     window.addEventListener('beforeunload', () => {
       if (this.sessionActive) {
-        this.log('[AppFig] Session ended');
+        this.log('INFO', 'Session ended');
         this.endSession();
       }
     });
@@ -1254,31 +1259,31 @@ class AppFigCore {
       device_operator = 'AND',
     } = rule.conditions || {};
 
-    this.log(`[AppFig] ruleMatches - Evaluating conditions:`);
-    this.log(`  - events:`, JSON.stringify(events));
-    this.log(`  - user_properties:`, JSON.stringify(user_properties));
-    this.log(`  - device:`, JSON.stringify(device));
+    this.log('DEBUG', `ruleMatches - Evaluating conditions`);
+    this.log('DEBUG', `  - events: ${JSON.stringify(events)}`);
+    this.log('DEBUG', `  - user_properties: ${JSON.stringify(user_properties)}`);
+    this.log('DEBUG', `  - device: ${JSON.stringify(device)}`);
 
     // Handle new EventsConfig format
     const eventsResult = this.evaluateEventsConfig(events, rule.sequential);
-    this.log(`[AppFig] Events evaluation result:`, eventsResult ? '✅ PASS' : '❌ FAIL');
+    this.log('DEBUG', `Events evaluation result: ${eventsResult ? '✅ PASS' : '❌ FAIL'}`);
 
     const userPropsResult = this.evaluatePropertiesWithOperator(
       user_properties,
       [this.userProperties],
       user_properties_operator
     );
-    this.log(`[AppFig] User properties evaluation result:`, userPropsResult ? '✅ PASS' : '❌ FAIL');
+    this.log('DEBUG', `User properties evaluation result: ${userPropsResult ? '✅ PASS' : '❌ FAIL'}`);
 
     const deviceResult = this.evaluatePropertiesWithOperator(
       device,
       [this.deviceProperties],
       device_operator
     );
-    this.log(`[AppFig] Device properties evaluation result:`, deviceResult ? '✅ PASS' : '❌ FAIL');
+    this.log('DEBUG', `Device properties evaluation result: ${deviceResult ? '✅ PASS' : '❌ FAIL'}`);
 
     const finalResult = eventsResult && userPropsResult && deviceResult;
-    this.log(`[AppFig] Final rule match result:`, finalResult ? '✅ PASS' : '❌ FAIL');
+    this.log('DEBUG', `Final rule match result: ${finalResult ? '✅ PASS' : '❌ FAIL'}`);
 
     return finalResult;
   }
@@ -1873,7 +1878,7 @@ class AppFigCore {
         this.log('WARN', `Schema upload failed: ${response.status}`);
       }
     } catch (err) {
-      this.warn('[AppFig] Schema upload error:', err);
+      this.log('WARN', `Schema upload error: ${err}`);
     }
   }
 
@@ -1908,10 +1913,10 @@ class AppFigCore {
           this.schemaCache.deviceProperties.set(prop, new Set(values as string[]));
         }
 
-        this.log('[AppFig] Loaded cached schema');
+        this.log('DEBUG', 'Loaded cached schema');
       }
     } catch (err) {
-      this.warn('[AppFig] Failed to load cached schema:', err);
+      this.log('WARN', `Failed to load cached schema: ${err}`);
     }
   }
 
@@ -1945,9 +1950,9 @@ class AppFigCore {
       }
 
       localStorage.setItem('appfig_schema_cache', JSON.stringify(data));
-      this.log('[AppFig] Saved schema cache');
+      this.log('DEBUG', 'Saved schema cache');
     } catch (err) {
-      this.warn('[AppFig] Failed to save schema cache:', err);
+      this.log('WARN', `Failed to save schema cache: ${err}`);
     }
   }
 }
