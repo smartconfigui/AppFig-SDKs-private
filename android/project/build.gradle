@@ -4,7 +4,6 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        // Android Gradle Plugin + Kotlin plugin
         classpath 'com.android.tools.build:gradle:8.2.2'
         classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.22'
     }
@@ -20,8 +19,18 @@ android {
     defaultConfig {
         minSdk 21
         targetSdk 34
-
         consumerProguardFiles "consumer-rules.pro"
+    }
+
+    // FIX: Required to avoid JVM mismatch error in AGP 8+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    // Kotlin JVM target
+    kotlinOptions {
+        jvmTarget = "17"
     }
 
     buildTypes {
@@ -36,10 +45,6 @@ android {
         pickFirst "**/*.kotlin_metadata"
         pickFirst "**/*.kotlin_module"
     }
-
-    kotlinOptions {
-        jvmTarget = "17"
-    }
 }
 
 repositories {
@@ -48,16 +53,17 @@ repositories {
 }
 
 //
-// -------- FAT AAR CONFIG --------
-// Everything added to `embed` is merged into the AAR
-//
+// ------- FAT AAR CONFIG --------------------------------------
+// All dependencies added to 'embed' will be physically included
+// inside the final .aar (OkHttp + Gson included)
+// --------------------------------------------------------------
 configurations {
     embed
     implementation.extendsFrom(embed)
 }
 
 dependencies {
-    // Dependencies to embed inside the AAR
+    // Embedded dependencies — will go INSIDE the AAR
     embed "com.squareup.okhttp3:okhttp:4.12.0"
     embed "com.google.code.gson:gson:2.10.1"
 
@@ -66,29 +72,31 @@ dependencies {
 }
 
 //
-// -------- MERGE EMBEDDED JARS INTO THE AAR --------
-// This produces a REAL fat AAR with OkHttp + Gson bundled.
-//
+// ------- MERGE EMBEDDED JARS INTO AAR -------------------------
+// This makes a REAL fat AAR including OkHttp + Gson jars
+// --------------------------------------------------------------
 afterEvaluate {
     tasks.withType(com.android.build.gradle.tasks.BundleAar).configureEach { task ->
         task.doLast {
             def outDir = task.archiveFile.get().asFile.parentFile
             def aarFile = task.archiveFile.get().asFile
 
-            // Unpack AAR to temp dir
+            // Temporary output directory
             def tempDir = new File(outDir, "tempAar")
             if (tempDir.exists()) tempDir.deleteDir()
             tempDir.mkdirs()
 
+            // unpack AAR
             copy {
                 from zipTree(aarFile)
                 into tempDir
             }
 
-            // Add embedded dependencies under /libs
+            // create libs/ folder inside AAR structure
             def libsDir = new File(tempDir, "libs")
             libsDir.mkdirs()
 
+            // copy embed jars into libs/
             configurations.embed.each { file ->
                 if (!file.isDirectory()) {
                     copy {
@@ -98,10 +106,11 @@ afterEvaluate {
                 }
             }
 
-            // Repack AAR
+            // recreate AAR with embedded jars
             aarFile.delete()
             ant.zip(destfile: aarFile, basedir: tempDir)
 
+            // cleanup
             tempDir.deleteDir()
         }
     }
