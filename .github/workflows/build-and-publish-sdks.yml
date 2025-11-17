@@ -46,12 +46,12 @@ jobs:
 
           echo "Cleaning build directories..."
           rm -rf artifacts/react
-          rm -rf .ci-react-build
+          rm -rf ci-react-build
           mkdir -p artifacts/react
-          mkdir -p .ci-react-build
+          mkdir -p ci-react-build
 
           echo "Initializing temporary npm project..."
-          cd .ci-react-build
+          cd ci-react-build
           npm init -y || { echo "npm init failed"; exit 1; }
 
           echo "Installing build dependencies..."
@@ -120,9 +120,9 @@ jobs:
           if [ ! -f README.md ]; then
             echo "AppFig SDKs" > README.md
             echo "" >> README.md
-            echo "This repository is auto-generated from the private AppFig-SDKs-private repository." >> README.md
-            echo "It contains packaged SDK artifacts for Unity, React, iOS, and Android." >> README.md
-            echo "Do not edit this repository manually." >> README.md
+            echo "Auto-generated from AppFig-SDKs-private." >> README.md
+            echo "Contains packaged SDK artifacts for Unity, React, iOS, Android." >> README.md
+            echo "Do not edit manually." >> README.md
           fi
 
       - name: Commit and push artifacts
