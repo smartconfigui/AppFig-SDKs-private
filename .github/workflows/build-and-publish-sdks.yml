@@ -32,7 +32,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       ############################################
-      # REACT SDK BUILD
+      # REACT SDK BUILD (SAFE VERSION)
       ############################################
 
       - name: Setup Node.js
@@ -43,10 +43,11 @@ jobs:
       - name: Build React SDK
         run: |
           set -e
-          mkdir -p artifacts/react
 
+          mkdir -p artifacts/react
           mkdir -p .ci-react-build
           cd .ci-react-build
+
           npm init -y > /dev/null 2>&1
           npm install typescript esbuild > /dev/null 2>&1
 
@@ -57,10 +58,9 @@ jobs:
             --format=esm \
             --outfile=../artifacts/react/AppFigReactSDK.min.js
 
-          cat > ../artifacts/react/index.d.ts << 'EOF'
-declare const AppFig: any;
-export default AppFig;
-EOF
+          # write index.d.ts with no heredoc
+          echo "declare const AppFig: any;" > ../artifacts/react/index.d.ts
+          echo "export default AppFig;" >> ../artifacts/react/index.d.ts
 
       ############################################
       # UNITY / IOS / ANDROID (temporary copies)
@@ -69,6 +69,7 @@ EOF
       - name: Prepare Unity iOS Android artifacts
         run: |
           set -e
+
           mkdir -p artifacts/unity
           mkdir -p artifacts/ios
           mkdir -p artifacts/android
@@ -84,6 +85,7 @@ EOF
       - name: Clone public repo
         run: |
           set -e
+
           git clone \
             https://x-access-token:${{ secrets.PUBLIC_REPO_TOKEN }}@github.com/${{ env.PUBLIC_REPO }}.git \
             public-repo
@@ -93,8 +95,10 @@ EOF
           set -e
           cd public-repo
 
+          # delete everything except .git
           find . -mindepth 1 -maxdepth 1 ! -name ".git" -exec rm -rf {} +
 
+          # recreate structure
           mkdir -p unity react ios android
 
           cp -R ../artifacts/unity/* unity/
@@ -105,13 +109,11 @@ EOF
           echo "${{ steps.version.outputs.version }}" > VERSION
 
           if [ ! -f README.md ]; then
-            cat > README.md << 'EOF'
-AppFig SDKs
-
-This repository is auto-generated from the private AppFig-SDKs-private repository.
-It contains packaged SDK artifacts for Unity, React, iOS, and Android.
-Do not edit this repository manually.
-EOF
+            echo "AppFig SDKs" > README.md
+            echo "" >> README.md
+            echo "This repository is auto-generated from the private AppFig-SDKs-private repo." >> README.md
+            echo "It contains packaged SDK artifacts for Unity, React, iOS, and Android." >> README.md
+            echo "Do not edit this repository manually." >> README.md
           fi
 
       - name: Commit and push artifacts
@@ -134,6 +136,7 @@ EOF
         run: |
           set -e
           cd public-repo
+
           VERSION="${{ steps.version.outputs.version }}"
 
           if git rev-parse "v$VERSION" >/dev/null 2>&1; then
