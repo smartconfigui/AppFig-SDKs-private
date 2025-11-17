@@ -72,13 +72,13 @@ jobs:
           rm -rf artifacts/unity
           mkdir -p artifacts/unity
 
-          DLL="unity/AppFig.dll"
+          DLL="unity/AppFigUnitySDK.dll"
           if [ ! -f "$DLL" ]; then
-            echo "ERROR: unity/AppFig.dll not found. Upload a compiled DLL to unity/ first."
+            echo "ERROR: unity/AppFigUnitySDK.dll not found. Upload a compiled DLL to unity/ first."
             exit 1
           fi
 
-          cp "$DLL" artifacts/unity/AppFig.dll
+          cp "$DLL" artifacts/unity/AppFigUnitySDK.dll
 
       #######################################################
       # ANDROID BUILD (Kotlin → AAR)
