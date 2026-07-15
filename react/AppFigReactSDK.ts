@@ -1,5 +1,82 @@
 // AppFigReactSDK.ts
 
+/**
+ * Analytics Provider Interface
+ *
+ * Defines the contract for analytics provider implementations.
+ * Each provider wraps a specific analytics SDK (Amplitude, Firebase, Mixpanel, etc.)
+ * and provides a unified interface for setting user properties.
+ */
+export interface IAnalyticsProvider {
+  /**
+   * Set a user property in the analytics provider
+   * @param key Property name (e.g., "appfig_experiments")
+   * @param value Property value (e.g., "exp1:variant1|exp2:variant2")
+   */
+  setUserProperty(key: string, value: string): void;
+}
+
+/**
+ * Amplitude Analytics Provider
+ * Integrates with Amplitude SDK for experiment tracking
+ */
+export class AmplitudeProvider implements IAnalyticsProvider {
+  constructor(private amplitude: any) {}
+
+  setUserProperty(key: string, value: string): void {
+    try {
+      // Amplitude's setUserProperties expects an object
+      this.amplitude.setUserProperties({ [key]: value });
+    } catch (err) {
+      console.warn(`[AppFig] Failed to set Amplitude user property: ${err}`);
+    }
+  }
+}
+
+/**
+ * Firebase Analytics Provider
+ * Integrates with Firebase Analytics for experiment tracking
+ */
+export class FirebaseProvider implements IAnalyticsProvider {
+  constructor(private firebase: any) {}
+
+  setUserProperty(key: string, value: string): void {
+    try {
+      // Firebase's setUserProperty is available in analytics module
+      this.firebase.setUserProperties({ [key]: value });
+    } catch (err) {
+      console.warn(`[AppFig] Failed to set Firebase user property: ${err}`);
+    }
+  }
+}
+
+/**
+ * Mixpanel Analytics Provider
+ * Integrates with Mixpanel SDK for experiment tracking
+ */
+export class MixpanelProvider implements IAnalyticsProvider {
+  constructor(private mixpanel: any) {}
+
+  setUserProperty(key: string, value: string): void {
+    try {
+      // Mixpanel's people.set is used for user properties
+      this.mixpanel.people.set({ [key]: value });
+    } catch (err) {
+      console.warn(`[AppFig] Failed to set Mixpanel user property: ${err}`);
+    }
+  }
+}
+
+/**
+ * Null Analytics Provider
+ * Used when no provider is registered (no-op implementation)
+ */
+export class NullAnalyticsProvider implements IAnalyticsProvider {
+  setUserProperty(_key: string, _value: string): void {
+    // No-op
+  }
+}
+
 export type AppFigEvent = {
   name: string;
   params?: Record<string, any>;
@@ -39,6 +116,17 @@ export type EventsConfig = {
   events?: Condition[];
 };
 
+export type ABTestVariant = {
+  name: string;
+  weight: number;
+  value: any;
+};
+
+export type ABTest = {
+  experiment_key: string;
+  variants: ABTestVariant[];
+};
+
 export type AppFigRule = {
   conditions: {
     events: Condition[] | EventsConfig;
@@ -48,7 +136,8 @@ export type AppFigRule = {
     device_operator?: 'AND' | 'OR';
   };
   sequential?: boolean;
-  value: any;
+  value?: any;
+  ab_test?: ABTest;
 };
 
 export type AppFigInitParams = {
@@ -72,7 +161,7 @@ export type AppFigInitParams = {
 
 class AppFigCore {
   private rules: Record<string, AppFigRule[]> = {};
-  private userId: string = '';
+  private userId: string | null = null;
   private eventHistory: AppFigEvent[] = [];
   private userProperties: Record<string, any> = {};
   private deviceProperties: Record<string, any> = {};
@@ -102,9 +191,19 @@ class AppFigCore {
   private eventsSavedCount: number = 0;
   private timeDecayIntervalId: NodeJS.Timeout | null = null;
 
+  // A/B Test variant assignment cache (per-session)
+  private variantAssignmentCache: Map<string, string> = new Map();
+
+  // Analytics integration
+  private analyticsProvider: IAnalyticsProvider = new NullAnalyticsProvider();
+  private activeExperiments: Map<string, string> = new Map(); // experimentKey -> variantName
+  private lastSyncedExperiments: string = ''; // last value sent to the analytics provider
+  private rulesExperimentKeys: Set<string> = new Set(); // experiment keys in current rules (rebuilt in buildIndex)
+
   // Callbacks and listeners
   private onReadyCallback?: () => void;
   private onRulesUpdatedCallback?: () => void;
+  private onVariantAssignedCallback?: (experimentKey: string, variantName: string) => void;
   private featureListeners: Map<string, Set<(featureName: string, value: any) => void>> = new Map();
   private features: Map<string, any> = new Map();
   private eventToFeaturesIndex: Map<string, Set<string>> = new Map();
@@ -134,7 +233,7 @@ class AppFigCore {
   }
 
   async init(params: AppFigInitParams) {
-    this.userId = params.userId;
+    this.userId = params.userId || null;
     this.companyId = params.companyId;
     this.tenantId = params.tenantId;
     this.env = params.env;
@@ -358,8 +457,8 @@ class AppFigCore {
 
     let newValue: any = null;
     for (const rule of featureRules) {
-      if (this.evaluateConditions(rule.conditions)) {
-        newValue = rule.value ?? 'on';
+      if (this.ruleMatches(rule)) {
+        newValue = this.resolveRuleValue(rule);
         break;
       }
     }
@@ -526,6 +625,7 @@ class AppFigCore {
     this.userPropertyToFeaturesIndex.clear();
     this.devicePropertyToFeaturesIndex.clear();
     this.featureToRulesIndex.clear();
+    this.rulesExperimentKeys.clear();
 
     let eventIndexCount = 0;
     let userPropIndexCount = 0;
@@ -537,6 +637,11 @@ class AppFigCore {
 
       for (const ruleSet of ruleSets) {
         const conditions = ruleSet.conditions;
+
+        // Track experiment keys present in the current rules (for ghost test purging)
+        if (this.hasValidABTest(ruleSet)) {
+          this.rulesExperimentKeys.add(ruleSet.ab_test!.experiment_key);
+        }
 
         // Index events
         const eventsConfig = conditions.events;
@@ -595,6 +700,13 @@ class AppFigCore {
       return;
     }
 
+    // Ghost test purging: drop experiments no longer present in the current rules
+    // (rulesExperimentKeys is rebuilt in buildIndex whenever rules change)
+    for (const expKey of this.activeExperiments.keys()) {
+      if (!this.rulesExperimentKeys.has(expKey)) {
+        this.activeExperiments.delete(expKey);
+      }
+    }
 
     // Evaluate each feature using the index for O(1) rule lookup
     for (const [featureName, ruleSet] of this.featureToRulesIndex.entries()) {
@@ -604,7 +716,7 @@ class AppFigCore {
       // Find first matching rule for this feature
       for (const rule of ruleSet) {
         if (this.ruleMatches(rule)) {
-          newValue = rule.value;
+          newValue = this.resolveRuleValue(rule);
           break;
         }
       }
@@ -629,6 +741,9 @@ class AppFigCore {
         this.features.delete(featureName);
       }
     }
+
+    // Sync final experiments to analytics (ghost test purging + active tests)
+    this.syncExperimentsToAnalytics();
   }
 
   private shouldPoll(): boolean {
@@ -984,6 +1099,51 @@ class AppFigCore {
     return { count, oldestEvent, newestEvent, sizeMB };
   }
 
+  public SetUserId(id: string | null): void {
+    if (this.userId !== id) {
+      this.userId = id;
+      this.variantAssignmentCache.clear();
+      this.activeExperiments.clear();
+      this.log('INFO', `User ID set to: ${id || '(null)'}`);
+
+      // Re-evaluate so the new identity gets fresh assignments immediately
+      // (also purges the previous user's experiments from analytics)
+      this.evaluateAllFeatures();
+    }
+  }
+
+  public GetUserId(): string | null {
+    return this.userId;
+  }
+
+  public SetOnVariantAssigned(callback: (experimentKey: string, variantName: string) => void): void {
+    this.onVariantAssignedCallback = callback;
+  }
+
+  public RegisterAnalyticsProvider(provider: IAnalyticsProvider): void {
+    this.analyticsProvider = provider;
+    this.log('INFO', 'Analytics provider registered');
+    // The new provider has never received the property; force a fresh sync
+    this.lastSyncedExperiments = '';
+    this.syncExperimentsToAnalytics();
+  }
+
+  private syncExperimentsToAnalytics(): void {
+    const experimentPairs = Array.from(this.activeExperiments.entries())
+      .map(([key, variant]) => `${key}:${variant}`)
+      .join('|');
+
+    // Only call the provider when the value actually changed. An empty string
+    // is a real update: it clears the property after the last experiment is
+    // removed (ghost test purging).
+    if (experimentPairs === this.lastSyncedExperiments) {
+      return;
+    }
+
+    this.lastSyncedExperiments = experimentPairs;
+    this.analyticsProvider.setUserProperty('appfig_experiments', experimentPairs);
+  }
+
   private detectPlatform(): string {
     const userAgent = navigator.userAgent.toLowerCase();
     const platform = navigator.platform?.toLowerCase() || '';
@@ -1249,6 +1409,71 @@ class AppFigCore {
     }
   }
 
+  /**
+   * Deterministic bucketing hash: 32-bit DJB2 over UTF-16 code units.
+   * Must stay identical to the Unity (C#), Android (Kotlin), and iOS (Swift)
+   * implementations so the same userId gets the same variant on every platform.
+   */
+  private hashUserToBucket(userId: string, experimentKey: string): number {
+    const input = userId + experimentKey;
+    let hash = 5381;
+    for (let i = 0; i < input.length; i++) {
+      hash = ((hash << 5) + hash + input.charCodeAt(i)) | 0; // hash * 33 + c, wrapped to 32 bits
+    }
+    const absHash = hash === -2147483648 ? 2147483647 : Math.abs(hash);
+    return absHash % 100; // Bucket 0-99
+  }
+
+  private hasValidABTest(rule: AppFigRule): boolean {
+    return !!(rule.ab_test && rule.ab_test.experiment_key && rule.ab_test.variants && rule.ab_test.variants.length > 0);
+  }
+
+  /**
+   * Resolve the value a matching rule yields: A/B variant value, static value,
+   * or the "on" default. Single source of truth for every evaluation path.
+   */
+  private resolveRuleValue(rule: AppFigRule): any {
+    if (this.hasValidABTest(rule)) {
+      const variant = this.selectVariant(this.userId, rule.ab_test!.experiment_key, rule.ab_test!.variants);
+      return variant ? variant.value : null;
+    }
+    return rule.value !== undefined ? rule.value : 'on';
+  }
+
+  private selectVariant(userId: string | null, experimentKey: string, variants: ABTestVariant[]): ABTestVariant | null {
+    if (variants.length === 0) {
+      return null;
+    }
+
+    // Anonymous users get the first variant (Control) but are NOT tracked:
+    // no cache write, no activeExperiments entry, no callback, no analytics.
+    if (!userId) {
+      return variants[0];
+    }
+
+    const cachedVariantName = this.variantAssignmentCache.get(experimentKey);
+    if (cachedVariantName !== undefined) {
+      const variant = variants.find(v => v.name === cachedVariantName) || variants[0];
+      this.activeExperiments.set(experimentKey, variant.name);
+      return variant;
+    }
+
+    const bucket = this.hashUserToBucket(userId, experimentKey);
+    let cumulativeWeight = 0;
+    let chosen = variants[variants.length - 1];
+    for (const variant of variants) {
+      cumulativeWeight += variant.weight;
+      if (bucket < cumulativeWeight) {
+        chosen = variant;
+        break;
+      }
+    }
+
+    this.variantAssignmentCache.set(experimentKey, chosen.name);
+    this.activeExperiments.set(experimentKey, chosen.name);
+    this.onVariantAssignedCallback?.(experimentKey, chosen.name);
+    return chosen;
+  }
 
   private ruleMatches(rule: AppFigRule): boolean {
     const {
@@ -1898,7 +2123,7 @@ class AppFigCore {
         for (const [event, paramMap] of Object.entries(data.eventParamValues || {})) {
           const valueMap = new Map();
           for (const [param, values] of Object.entries(paramMap as any)) {
-            valueMap.set(param, new Set(values));
+            valueMap.set(param, new Set(values as string[]));
           }
           this.schemaCache.eventParamValues.set(event, valueMap);
         }

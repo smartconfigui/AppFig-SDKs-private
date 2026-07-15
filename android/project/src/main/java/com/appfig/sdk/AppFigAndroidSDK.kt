@@ -66,10 +66,104 @@ import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody // ByteArray.toRequestBody extension
 import java.io.IOException
+import java.lang.reflect.Method
 import java.util.*
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+
+/**
+ * Analytics Provider Interface
+ */
+interface IAnalyticsProvider {
+    /**
+     * Set a user property in the analytics provider
+     * @param key Property name (e.g., "appfig_experiments")
+     * @param value Property value (e.g., "exp1:variant1|exp2:variant2")
+     */
+    fun setUserProperty(key: String, value: String)
+}
+
+/**
+ * Amplitude Analytics Provider for Android.
+ * Expects an instance exposing setUserProperties(Map).
+ */
+class AmplitudeProvider(private val amplitude: Any) : IAnalyticsProvider {
+    private val setUserPropertiesMethod: Method? = try {
+        amplitude.javaClass.getMethod("setUserProperties", Map::class.java)
+    } catch (err: Exception) {
+        Log.w("AppFig", "Amplitude instance does not expose setUserProperties(Map): $err")
+        null
+    }
+
+    override fun setUserProperty(key: String, value: String) {
+        val method = setUserPropertiesMethod ?: return
+        try {
+            method.invoke(amplitude, mapOf(key to value))
+        } catch (err: Exception) {
+            Log.w("AppFig", "Failed to set Amplitude user property: $err")
+        }
+    }
+}
+
+/**
+ * Firebase Analytics Provider for Android.
+ * Expects an instance exposing setUserProperty(String, String).
+ */
+class FirebaseProvider(private val firebase: Any) : IAnalyticsProvider {
+    private val setUserPropertyMethod: Method? = try {
+        firebase.javaClass.getMethod("setUserProperty", String::class.java, String::class.java)
+    } catch (err: Exception) {
+        Log.w("AppFig", "Firebase instance does not expose setUserProperty(String, String): $err")
+        null
+    }
+
+    override fun setUserProperty(key: String, value: String) {
+        val method = setUserPropertyMethod ?: return
+        try {
+            method.invoke(firebase, key, value)
+        } catch (err: Exception) {
+            Log.w("AppFig", "Failed to set Firebase user property: $err")
+        }
+    }
+}
+
+/**
+ * Mixpanel Analytics Provider for Android.
+ * Expects an instance exposing getPeople() whose result exposes set(String, Object).
+ */
+class MixpanelProvider(mixpanel: Any) : IAnalyticsProvider {
+    private var people: Any? = null
+    private var setMethod: Method? = null
+
+    init {
+        try {
+            people = mixpanel.javaClass.getMethod("getPeople").invoke(mixpanel)
+            setMethod = people?.javaClass?.getMethod("set", String::class.java, Any::class.java)
+        } catch (err: Exception) {
+            Log.w("AppFig", "Mixpanel instance does not expose getPeople().set(String, Object): $err")
+        }
+    }
+
+    override fun setUserProperty(key: String, value: String) {
+        val method = setMethod ?: return
+        try {
+            method.invoke(people, key, value)
+        } catch (err: Exception) {
+            Log.w("AppFig", "Failed to set Mixpanel user property: $err")
+        }
+    }
+}
+
+/**
+ * Null Analytics Provider for Android
+ * No-op implementation used when no provider is registered
+ */
+class NullAnalyticsProvider : IAnalyticsProvider {
+    override fun setUserProperty(key: String, value: String) {
+        // No-op
+    }
+}
 
 /**
  * Main AppFig SDK class
@@ -147,6 +241,21 @@ object AppFig {
     private val userPropertyToFeaturesIndex = mutableMapOf<String, MutableSet<String>>()
     private val devicePropertyToFeaturesIndex = mutableMapOf<String, MutableSet<String>>()
     private val featureToRulesIndex = mutableMapOf<String, MutableList<Rule>>()
+
+    // A/B Test variant assignment cache (per-session)
+    private val variantAssignmentCache = mutableMapOf<String, String>()
+
+    // User identity for A/B test assignment
+    private var userId: String? = null
+
+    // Analytics integration
+    private var analyticsProvider: IAnalyticsProvider = NullAnalyticsProvider()
+    private val activeExperiments = mutableMapOf<String, String>() // experimentKey -> variantName
+    private var lastSyncedExperiments: String = "" // last value sent to the analytics provider
+    private val rulesExperimentKeys = mutableSetOf<String>() // experiment keys in current rules (rebuilt in buildIndexes)
+
+    // Callbacks
+    private var onVariantAssignedCallback: ((experimentKey: String, variantName: String) -> Unit)? = null
 
     // Local mode
     private var useLocalMode: Boolean = false
@@ -694,7 +803,7 @@ object AppFig {
             if (rule.feature == feature) {
                 val passed = evaluateConditions(rule.conditions)
                 if (passed) {
-                    val value = rule.value ?: "on"
+                    val value = resolveRuleValue(rule)
                     synchronized(features) {
                         features[feature] = value
                     }
@@ -733,6 +842,53 @@ object AppFig {
      */
     @JvmStatic
     fun hasRulesLoaded(): Boolean = rules.isNotEmpty()
+
+    @JvmStatic
+    fun setUserId(id: String?) {
+        if (userId != id) {
+            userId = id
+            variantAssignmentCache.clear()
+            activeExperiments.clear()
+            log(AppFigLogLevel.INFO, "User ID set to: ${id ?: "(null)"}")
+
+            // Re-evaluate so the new identity gets fresh assignments immediately
+            // (also purges the previous user's experiments from analytics)
+            evaluateAllFeatures()
+        }
+    }
+
+    @JvmStatic
+    fun getUserId(): String? = userId
+
+    @JvmStatic
+    fun setOnVariantAssigned(callback: (experimentKey: String, variantName: String) -> Unit) {
+        onVariantAssignedCallback = callback
+    }
+
+    @JvmStatic
+    fun registerAnalyticsProvider(provider: IAnalyticsProvider) {
+        analyticsProvider = provider
+        log(AppFigLogLevel.INFO, "Analytics provider registered")
+        // The new provider has never received the property; force a fresh sync
+        lastSyncedExperiments = ""
+        syncExperimentsToAnalytics()
+    }
+
+    private fun syncExperimentsToAnalytics() {
+        val experimentPairs = activeExperiments.entries.joinToString("|") { (key, variant) ->
+            "$key:$variant"
+        }
+
+        // Only call the provider when the value actually changed. An empty string
+        // is a real update: it clears the property after the last experiment is
+        // removed (ghost test purging).
+        if (experimentPairs == lastSyncedExperiments) {
+            return
+        }
+
+        lastSyncedExperiments = experimentPairs
+        analyticsProvider.setUserProperty("appfig_experiments", experimentPairs)
+    }
 
     /**
      * Reset a specific feature's cached value and force re-evaluation
@@ -1339,7 +1495,7 @@ object AppFig {
 
             featureWrapper.features.forEach { (featureName, ruleSets) ->
                 ruleSets.forEach { ruleSet ->
-                    newRules.add(Rule(featureName, ruleSet.value, ruleSet.conditions))
+                    newRules.add(Rule(feature = featureName, value = ruleSet.value, ab_test = ruleSet.ab_test, conditions = ruleSet.conditions))
                 }
             }
 
@@ -1363,7 +1519,7 @@ object AppFig {
 
                 featureWrapper.features.forEach { (featureName, ruleSets) ->
                     ruleSets.forEach { ruleSet ->
-                        newRules.add(Rule(featureName, ruleSet.value, ruleSet.conditions))
+                        newRules.add(Rule(feature = featureName, value = ruleSet.value, ab_test = ruleSet.ab_test, conditions = ruleSet.conditions))
                     }
                 }
 
@@ -1391,6 +1547,7 @@ object AppFig {
         userPropertyToFeaturesIndex.clear()
         devicePropertyToFeaturesIndex.clear()
         featureToRulesIndex.clear()
+        rulesExperimentKeys.clear()
 
         var eventIndexCount = 0
         var userPropIndexCount = 0
@@ -1401,6 +1558,11 @@ object AppFig {
 
             // Build feature-to-rules index for O(1) rule lookup during evaluation
             featureToRulesIndex.getOrPut(featureName) { mutableListOf() }.add(rule)
+
+            // Track experiment keys present in the current rules (for ghost test purging)
+            if (hasValidABTest(rule)) {
+                rulesExperimentKeys.add(rule.ab_test!!.experiment_key)
+            }
 
             // Index events from events array regardless of mode
             val eventsConfig = rule.conditions.events
@@ -1438,6 +1600,73 @@ object AppFig {
     }
 
     /**
+     * 32-bit DJB2 hash over UTF-16 code units, reduced to a 0-99 bucket.
+     * Must stay identical to the React (TS), Unity (C#), and iOS (Swift)
+     * implementations so the same userId gets the same variant on every platform.
+     */
+    private fun hashUserToBucket(userId: String, experimentKey: String): Int {
+        val input = userId + experimentKey
+        var hash = 5381 // DJB2 initial value
+        for (c in input) {
+            hash = ((hash shl 5) + hash) + c.code // hash * 33 + c
+        }
+        // Ensure positive result
+        val absHash = if (hash == Int.MIN_VALUE) Int.MAX_VALUE else abs(hash)
+        return absHash % 100 // Bucket 0-99
+    }
+
+    private fun hasValidABTest(rule: Rule): Boolean {
+        val abTest = rule.ab_test ?: return false
+        return abTest.experiment_key.isNotEmpty() && abTest.variants.isNotEmpty()
+    }
+
+    /**
+     * Resolve the value a matching rule yields: A/B variant value, static value,
+     * or the "on" default. Single source of truth for every evaluation path.
+     */
+    private fun resolveRuleValue(rule: Rule): String? {
+        if (hasValidABTest(rule)) {
+            return selectVariant(userId, rule.ab_test!!.experiment_key, rule.ab_test.variants)
+        }
+        return rule.value ?: "on"
+    }
+
+    private fun selectVariant(userId: String?, experimentKey: String, variants: List<ABTestVariant>): String? {
+        if (variants.isEmpty()) {
+            return null
+        }
+
+        // Anonymous users get the first variant (Control) but are NOT tracked:
+        // no cache write, no activeExperiments entry, no callback, no analytics.
+        if (userId == null) {
+            return variants.first().value
+        }
+
+        variantAssignmentCache[experimentKey]?.let { cachedVariantName ->
+            val variant = variants.find { it.name == cachedVariantName } ?: variants.first()
+            activeExperiments[experimentKey] = variant.name
+            return variant.value
+        }
+
+        val bucket = hashUserToBucket(userId, experimentKey)
+        var cumulativeWeight = 0f
+        var chosen = variants.last()
+
+        for (variant in variants) {
+            cumulativeWeight += variant.weight
+            if (bucket < cumulativeWeight) {
+                chosen = variant
+                break
+            }
+        }
+
+        variantAssignmentCache[experimentKey] = chosen.name
+        activeExperiments[experimentKey] = chosen.name
+        onVariantAssignedCallback?.invoke(experimentKey, chosen.name)
+        return chosen.value
+    }
+
+    /**
      * Evaluate ALL features completely (Unity SDK approach)
      * No dirty feature tracking - always evaluate everything
      * Simpler, more reliable, and matches Unity SDK behavior
@@ -1448,6 +1677,10 @@ object AppFig {
             return
         }
 
+        // Ghost test purging: drop experiments no longer present in the current rules
+        // (rulesExperimentKeys is rebuilt in buildIndexes whenever rules change)
+        val keysToRemove = activeExperiments.keys.filter { !rulesExperimentKeys.contains(it) }
+        keysToRemove.forEach { activeExperiments.remove(it) }
 
         val changedFeatures = mutableSetOf<String>()
 
@@ -1459,7 +1692,7 @@ object AppFig {
             // Find first matching rule for this feature (no linear search needed!)
             for (rule in featureRules) {
                 if (evaluateConditions(rule.conditions)) {
-                    newValue = rule.value ?: "on"
+                    newValue = resolveRuleValue(rule)
                     break
                 }
             }
@@ -1483,6 +1716,9 @@ object AppFig {
                 changedFeatures.add(key)
             }
         }
+
+        // Sync final experiments to analytics (ghost test purging + active tests)
+        syncExperimentsToAnalytics()
 
         // Notify listeners of changed features
         if (changedFeatures.isNotEmpty()) {
@@ -1589,7 +1825,7 @@ object AppFig {
 
         for ((index, rule) in matchingRules.withIndex()) {
             if (evaluateConditions(rule.conditions)) {
-                return rule.value
+                return resolveRuleValue(rule)
             }
         }
 
@@ -2209,9 +2445,21 @@ object AppFig {
         val parameters: MutableMap<String, String> = mutableMapOf()
     )
 
+    data class ABTestVariant(
+        val name: String,
+        val weight: Float,
+        val value: String
+    )
+
+    data class ABTest(
+        val experiment_key: String,
+        val variants: List<ABTestVariant>
+    )
+
     data class Rule(
         val feature: String,
-        val value: String,
+        val value: String? = null,
+        val ab_test: ABTest? = null,
         val conditions: RuleConditions
     )
 
@@ -2270,7 +2518,8 @@ object AppFig {
     )
 
     private data class RuleSet(
-        val value: String,
+        val value: String? = null,
+        val ab_test: ABTest? = null,
         val conditions: RuleConditions
     )
 

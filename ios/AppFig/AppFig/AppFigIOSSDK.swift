@@ -39,6 +39,98 @@
 import Foundation
 import UIKit
 
+/**
+ * Analytics Provider Protocol
+ */
+protocol IAnalyticsProvider {
+    /**
+     * Set a user property in the analytics provider
+     * - Parameter key: Property name (e.g., "appfig_experiments")
+     * - Parameter value: Property value (e.g., "exp1:variant1|exp2:variant2")
+     */
+    func setUserProperty(key: String, value: String)
+}
+
+/**
+ * Amplitude Analytics Provider for iOS.
+ * Expects an instance responding to setUserProperties: (e.g. Amplitude.instance()).
+ */
+class AmplitudeProvider: IAnalyticsProvider {
+    private let amplitude: NSObject
+    private let selector = NSSelectorFromString("setUserProperties:")
+
+    init(amplitude: NSObject) {
+        self.amplitude = amplitude
+        if !amplitude.responds(to: selector) {
+            print("[AppFig] Amplitude instance does not respond to setUserProperties:")
+        }
+    }
+
+    func setUserProperty(key: String, value: String) {
+        guard amplitude.responds(to: selector) else { return }
+        _ = amplitude.perform(selector, with: [key: value] as NSDictionary)
+    }
+}
+
+/**
+ * Firebase Analytics Provider for iOS.
+ * Expects an instance responding to setUserProperty:forName:
+ * (Firebase's Analytics API is class-based; pass a thin NSObject wrapper,
+ * or use a custom IAnalyticsProvider that calls Analytics.setUserProperty directly).
+ */
+class FirebaseProvider: IAnalyticsProvider {
+    private let firebase: NSObject
+    private let selector = NSSelectorFromString("setUserProperty:forName:")
+
+    init(firebase: NSObject) {
+        self.firebase = firebase
+        if !firebase.responds(to: selector) {
+            print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
+        }
+    }
+
+    func setUserProperty(key: String, value: String) {
+        guard firebase.responds(to: selector) else { return }
+        _ = firebase.perform(selector, with: value as NSString, with: key as NSString)
+    }
+}
+
+/**
+ * Mixpanel Analytics Provider for iOS.
+ * Expects an instance whose `people` object responds to set:
+ * (e.g. Mixpanel.mainInstance()).
+ */
+class MixpanelProvider: IAnalyticsProvider {
+    private let people: NSObject?
+    private let setSelector = NSSelectorFromString("set:")
+
+    init(mixpanel: NSObject) {
+        let peopleSelector = NSSelectorFromString("people")
+        if mixpanel.responds(to: peopleSelector),
+           let peopleObject = mixpanel.perform(peopleSelector)?.takeUnretainedValue() as? NSObject {
+            people = peopleObject
+        } else {
+            people = nil
+            print("[AppFig] Mixpanel instance does not expose people")
+        }
+    }
+
+    func setUserProperty(key: String, value: String) {
+        guard let people = people, people.responds(to: setSelector) else { return }
+        _ = people.perform(setSelector, with: [key: value] as NSDictionary)
+    }
+}
+
+/**
+ * Null Analytics Provider for iOS
+ * No-op implementation used when no provider is registered
+ */
+class NullAnalyticsProvider: IAnalyticsProvider {
+    func setUserProperty(key: String, value: String) {
+        // No-op
+    }
+}
+
 /// Main AppFig SDK class
 /// Thread-safe static class for managing feature flags and remote configuration
 public class AppFig {
@@ -131,7 +223,20 @@ public class AppFig {
     // Callbacks and listeners
     private static var onReadyCallback: (() -> Void)?
     private static var onRulesUpdatedCallback: (() -> Void)?
+    private static var onVariantAssignedCallback: ((String, String) -> Void)?
     private static var featureListeners: [String: Set<FeatureListener>] = [:]
+
+    // A/B Test variant assignment cache (per-session)
+    private static var variantAssignmentCache: [String: String] = [:]
+
+    // User identity for A/B test assignment
+    private static var userId: String? = nil
+
+    // Analytics integration
+    private static var analyticsProvider: IAnalyticsProvider = NullAnalyticsProvider()
+    private static var activeExperiments: [String: String] = [:] // experimentKey -> variantName
+    private static var lastSyncedExperiments: String = "" // last value sent to the analytics provider
+    private static var rulesExperimentKeys: Set<String> = [] // experiment keys in current rules (rebuilt in buildIndexes)
 
     private class FeatureListener: Hashable {
         let id = UUID()
@@ -573,7 +678,7 @@ public class AppFig {
             if rule.feature == feature {
                 let passed = evaluateConditions(rule.conditions)
                 if passed {
-                    let value = rule.value
+                    let value = resolveRuleValue(rule)
                     features[feature] = value
                     return value
                 }
@@ -607,6 +712,69 @@ public class AppFig {
     /// - Returns: true if rules are loaded, false otherwise
     public static func hasRulesLoaded() -> Bool {
         return queue.sync { !rules.isEmpty }
+    }
+
+    /// Set the user ID for A/B test assignment
+    ///
+    /// - Parameter id: User identifier for deterministic bucketing, or nil to clear
+    public static func setUserId(_ id: String?) {
+        queue.async(flags: .barrier) {
+            if userId != id {
+                userId = id
+                variantAssignmentCache.removeAll()
+                activeExperiments.removeAll()
+                log(.info, "User ID set to: \(id ?? "(null)")")
+
+                // Re-evaluate so the new identity gets fresh assignments immediately
+                // (also purges the previous user's experiments from analytics)
+                evaluateAllFeatures()
+            }
+        }
+    }
+
+    /// Get the current user ID
+    ///
+    /// - Returns: Current user ID or nil
+    public static func getUserId() -> String? {
+        return queue.sync { userId }
+    }
+
+    /// Set callback for when a user is assigned to a variant
+    ///
+    /// - Parameter callback: Closure invoked with (experimentKey, variantName) when assignment occurs
+    public static func setOnVariantAssigned(_ callback: @escaping (String, String) -> Void) {
+        queue.async(flags: .barrier) {
+            onVariantAssignedCallback = callback
+        }
+    }
+
+    /// Register an analytics provider for tracking variant assignments
+    ///
+    /// - Parameter provider: Analytics provider implementation
+    public static func registerAnalyticsProvider(_ provider: IAnalyticsProvider) {
+        queue.async(flags: .barrier) {
+            analyticsProvider = provider
+            log(.info, "Analytics provider registered")
+            // The new provider has never received the property; force a fresh sync
+            lastSyncedExperiments = ""
+            syncExperimentsToAnalytics()
+        }
+    }
+
+    private static func syncExperimentsToAnalytics() {
+        let experimentPairs = activeExperiments
+            .map { key, variant in "\(key):\(variant)" }
+            .joined(separator: "|")
+
+        // Only call the provider when the value actually changed. An empty string
+        // is a real update: it clears the property after the last experiment is
+        // removed (ghost test purging).
+        if experimentPairs == lastSyncedExperiments {
+            return
+        }
+
+        lastSyncedExperiments = experimentPairs
+        analyticsProvider.setUserProperty(key: "appfig_experiments", value: experimentPairs)
     }
 
     /// Reset a specific feature's cached value and force re-evaluation
@@ -1114,7 +1282,7 @@ public class AppFig {
 
             for (featureName, ruleSets) in featureWrapper.features {
                 for ruleSet in ruleSets {
-                    newRules.append(Rule(feature: featureName, value: ruleSet.value, conditions: ruleSet.conditions))
+                    newRules.append(Rule(feature: featureName, value: ruleSet.value, ab_test: ruleSet.ab_test, conditions: ruleSet.conditions))
                 }
             }
 
@@ -1152,7 +1320,7 @@ public class AppFig {
 
                 for (featureName, ruleSets) in featureWrapper.features {
                     for ruleSet in ruleSets {
-                        newRules.append(Rule(feature: featureName, value: ruleSet.value, conditions: ruleSet.conditions))
+                        newRules.append(Rule(feature: featureName, value: ruleSet.value, ab_test: ruleSet.ab_test, conditions: ruleSet.conditions))
                     }
                 }
 
@@ -1184,6 +1352,7 @@ public class AppFig {
         userPropertyToFeaturesIndex.removeAll()
         devicePropertyToFeaturesIndex.removeAll()
         featureToRulesIndex.removeAll()
+        rulesExperimentKeys.removeAll()
 
         var eventIndexCount = 0
         var userPropIndexCount = 0
@@ -1194,6 +1363,11 @@ public class AppFig {
 
             // Build feature-to-rules index for O(1) rule lookup during evaluation
             featureToRulesIndex[featureName, default: []].append(rule)
+
+            // Track experiment keys present in the current rules (for ghost test purging)
+            if hasValidABTest(rule) {
+                rulesExperimentKeys.insert(rule.ab_test!.experiment_key)
+            }
 
             // Index events from both simple and sequence modes
             let eventsConfig = rule.conditions.events
@@ -1229,6 +1403,75 @@ public class AppFig {
     }
 
     /**
+     * 32-bit DJB2 hash over UTF-16 code units, reduced to a 0-99 bucket.
+     * Must stay identical to the React (TS), Unity (C#), and Android (Kotlin)
+     * implementations so the same userId gets the same variant on every platform.
+     * Int32 arithmetic with wrapping operators matches the 32-bit overflow
+     * behavior of the other platforms (Swift's Int is 64-bit and would diverge).
+     */
+    private static func hashUserToBucket(userId: String, experimentKey: String) -> Int {
+        let input = userId + experimentKey
+        var hash: Int32 = 5381 // DJB2 initial value
+        for codeUnit in input.utf16 {
+            hash = ((hash << 5) &+ hash) &+ Int32(codeUnit) // hash * 33 + c, wrapped to 32 bits
+        }
+        // Ensure positive result
+        let absHash = hash == Int32.min ? Int32.max : abs(hash)
+        return Int(absHash % 100) // Bucket 0-99
+    }
+
+    private static func hasValidABTest(_ rule: Rule) -> Bool {
+        guard let abTest = rule.ab_test else { return false }
+        return !abTest.experiment_key.isEmpty && !abTest.variants.isEmpty
+    }
+
+    /**
+     * Resolve the value a matching rule yields: A/B variant value, static value,
+     * or the "on" default. Single source of truth for every evaluation path.
+     */
+    private static func resolveRuleValue(_ rule: Rule) -> String? {
+        if hasValidABTest(rule) {
+            return selectVariant(userId: userId, experimentKey: rule.ab_test!.experiment_key, variants: rule.ab_test!.variants)
+        }
+        return rule.value ?? "on"
+    }
+
+    private static func selectVariant(userId: String?, experimentKey: String, variants: [ABTestVariant]) -> String? {
+        guard !variants.isEmpty else {
+            return nil
+        }
+
+        // Anonymous users get the first variant (Control) but are NOT tracked:
+        // no cache write, no activeExperiments entry, no callback, no analytics.
+        guard let userId = userId else {
+            return variants[0].value
+        }
+
+        if let cachedVariantName = variantAssignmentCache[experimentKey] {
+            let variant = variants.first(where: { $0.name == cachedVariantName }) ?? variants[0]
+            activeExperiments[experimentKey] = variant.name
+            return variant.value
+        }
+
+        let bucket = hashUserToBucket(userId: userId, experimentKey: experimentKey)
+        var cumulativeWeight: Float = 0
+        var chosen = variants[variants.count - 1]
+
+        for variant in variants {
+            cumulativeWeight += variant.weight
+            if Float(bucket) < cumulativeWeight {
+                chosen = variant
+                break
+            }
+        }
+
+        variantAssignmentCache[experimentKey] = chosen.name
+        activeExperiments[experimentKey] = chosen.name
+        onVariantAssignedCallback?(experimentKey, chosen.name)
+        return chosen.value
+    }
+
+    /**
      * Evaluate ALL features completely (Unity SDK approach)
      * No dirty feature tracking - always evaluate everything
      * Simpler, more reliable, and matches Unity SDK behavior
@@ -1239,6 +1482,10 @@ public class AppFig {
             return
         }
 
+        // Ghost test purging: drop experiments no longer present in the current rules
+        // (rulesExperimentKeys is rebuilt in buildIndexes whenever rules change)
+        let keysToRemove = activeExperiments.keys.filter { !rulesExperimentKeys.contains($0) }
+        keysToRemove.forEach { activeExperiments.removeValue(forKey: $0) }
 
         var changedFeatures = Set<String>()
 
@@ -1250,7 +1497,7 @@ public class AppFig {
             // Find first matching rule for this feature (no linear search needed!)
             for rule in featureRules {
                 if evaluateConditions(rule.conditions) {
-                    newValue = rule.value
+                    newValue = resolveRuleValue(rule)
                     break
                 }
             }
@@ -1270,6 +1517,9 @@ public class AppFig {
             features.removeValue(forKey: key)
             changedFeatures.insert(key)
         }
+
+        // Sync final experiments to analytics (ghost test purging + active tests)
+        syncExperimentsToAnalytics()
 
         // Notify listeners of changed features
         if !changedFeatures.isEmpty {
@@ -1374,7 +1624,7 @@ public class AppFig {
 
         for rule in matchingRules {
             if evaluateConditions(rule.conditions) {
-                return rule.value
+                return resolveRuleValue(rule)
             }
         }
 
@@ -1957,9 +2207,21 @@ struct EventRecord: Codable {
     let parameters: [String: String]
 }
 
+struct ABTestVariant: Codable {
+    let name: String
+    let weight: Float
+    let value: String
+}
+
+struct ABTest: Codable {
+    let experiment_key: String
+    let variants: [ABTestVariant]
+}
+
 struct Rule: Codable {
     let feature: String
-    let value: String
+    let value: String?
+    let ab_test: ABTest?
     let conditions: RuleConditions
 }
 
@@ -2052,7 +2314,8 @@ struct FeatureWrapper: Codable {
 }
 
 struct RuleSet: Codable {
-    let value: String
+    let value: String?
+    let ab_test: ABTest?
     let conditions: RuleConditions
 }
 
