@@ -42,7 +42,7 @@ import UIKit
 /**
  * Analytics Provider Protocol
  */
-protocol IAnalyticsProvider {
+public protocol IAnalyticsProvider {
     /**
      * Set a user property in the analytics provider
      * - Parameter key: Property name (e.g., "appfig_experiments")
@@ -55,18 +55,18 @@ protocol IAnalyticsProvider {
  * Amplitude Analytics Provider for iOS.
  * Expects an instance responding to setUserProperties: (e.g. Amplitude.instance()).
  */
-class AmplitudeProvider: IAnalyticsProvider {
+public class AmplitudeProvider: IAnalyticsProvider {
     private let amplitude: NSObject
     private let selector = NSSelectorFromString("setUserProperties:")
 
-    init(amplitude: NSObject) {
+    public init(amplitude: NSObject) {
         self.amplitude = amplitude
         if !amplitude.responds(to: selector) {
             print("[AppFig] Amplitude instance does not respond to setUserProperties:")
         }
     }
 
-    func setUserProperty(key: String, value: String) {
+    public func setUserProperty(key: String, value: String) {
         guard amplitude.responds(to: selector) else { return }
         _ = amplitude.perform(selector, with: [key: value] as NSDictionary)
     }
@@ -78,18 +78,18 @@ class AmplitudeProvider: IAnalyticsProvider {
  * (Firebase's Analytics API is class-based; pass a thin NSObject wrapper,
  * or use a custom IAnalyticsProvider that calls Analytics.setUserProperty directly).
  */
-class FirebaseProvider: IAnalyticsProvider {
+public class FirebaseProvider: IAnalyticsProvider {
     private let firebase: NSObject
     private let selector = NSSelectorFromString("setUserProperty:forName:")
 
-    init(firebase: NSObject) {
+    public init(firebase: NSObject) {
         self.firebase = firebase
         if !firebase.responds(to: selector) {
             print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
         }
     }
 
-    func setUserProperty(key: String, value: String) {
+    public func setUserProperty(key: String, value: String) {
         guard firebase.responds(to: selector) else { return }
         _ = firebase.perform(selector, with: value as NSString, with: key as NSString)
     }
@@ -100,11 +100,11 @@ class FirebaseProvider: IAnalyticsProvider {
  * Expects an instance whose `people` object responds to set:
  * (e.g. Mixpanel.mainInstance()).
  */
-class MixpanelProvider: IAnalyticsProvider {
+public class MixpanelProvider: IAnalyticsProvider {
     private let people: NSObject?
     private let setSelector = NSSelectorFromString("set:")
 
-    init(mixpanel: NSObject) {
+    public init(mixpanel: NSObject) {
         let peopleSelector = NSSelectorFromString("people")
         if mixpanel.responds(to: peopleSelector),
            let peopleObject = mixpanel.perform(peopleSelector)?.takeUnretainedValue() as? NSObject {
@@ -115,7 +115,7 @@ class MixpanelProvider: IAnalyticsProvider {
         }
     }
 
-    func setUserProperty(key: String, value: String) {
+    public func setUserProperty(key: String, value: String) {
         guard let people = people, people.responds(to: setSelector) else { return }
         _ = people.perform(setSelector, with: [key: value] as NSDictionary)
     }
@@ -125,8 +125,10 @@ class MixpanelProvider: IAnalyticsProvider {
  * Null Analytics Provider for iOS
  * No-op implementation used when no provider is registered
  */
-class NullAnalyticsProvider: IAnalyticsProvider {
-    func setUserProperty(key: String, value: String) {
+public class NullAnalyticsProvider: IAnalyticsProvider {
+    public init() {}
+
+    public func setUserProperty(key: String, value: String) {
         // No-op
     }
 }
