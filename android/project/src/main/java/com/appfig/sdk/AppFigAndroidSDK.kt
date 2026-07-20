@@ -777,15 +777,15 @@ object AppFig {
      */
     @JvmStatic
     fun getFeatureValue(feature: String): String? {
-        // ==========================================
-        // FIX:
-        // Do NOT warn during init if rules are not yet loaded.
-        // Instead, return null silently until first CDN fetch.
-        // ==========================================
-        if (!isInitialized) return null
+        // Synchronized check before proceeding
+        synchronized(this) {
+            // Do NOT warn during init if rules are not yet loaded.
+            // Instead, return null silently until first CDN fetch.
+            if (!isInitialized) return null
 
-        // If rules haven't loaded yet, return null silently.
-        if (rules.isEmpty()) return null
+            // If rules haven't loaded yet, return null silently.
+            if (rules.isEmpty()) return null
+        }
 
         // Check if rules need refreshing (automatic updating)
         checkAndTriggerAutoRefresh()
@@ -799,15 +799,18 @@ object AppFig {
         }
 
         // Evaluate on-demand if not cached
-        rules.forEach { rule ->
-            if (rule.feature == feature) {
-                val passed = evaluateConditions(rule.conditions)
-                if (passed) {
-                    val value = resolveRuleValue(rule)
-                    synchronized(features) {
-                        features[feature] = value
+        // Synchronize rules read
+        synchronized(this) {
+            rules.forEach { rule ->
+                if (rule.feature == feature) {
+                    val passed = evaluateConditions(rule.conditions)
+                    if (passed) {
+                        val value = resolveRuleValue(rule)
+                        synchronized(features) {
+                            features[feature] = value
+                        }
+                        return value
                     }
-                    return value
                 }
             }
         }
@@ -841,7 +844,7 @@ object AppFig {
      * @return true if rules are loaded, false otherwise
      */
     @JvmStatic
-    fun hasRulesLoaded(): Boolean = rules.isNotEmpty()
+    fun hasRulesLoaded(): Boolean = synchronized(this) { rules.isNotEmpty() }
 
     @JvmStatic
     fun setUserId(id: String?) {

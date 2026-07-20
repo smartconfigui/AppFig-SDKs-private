@@ -470,7 +470,9 @@ public class AppFig {
     ///   - name: Name of the event
     ///   - parameters: Optional event parameters as key-value pairs
     public static func logEvent(name: String, parameters: [String: String]? = nil) {
-        guard isInitialized else {
+        // Synchronized check before queue dispatch
+        let initialized = queue.sync { isInitialized }
+        guard initialized else {
             print("⚠️ [AppFig] AppFig not initialized. Call initialize() first.")
             return
         }
@@ -654,34 +656,36 @@ public class AppFig {
     /// - Parameter feature: Feature name
     /// - Returns: Feature value or nil
     public static func getFeatureValue(_ feature: String) -> String? {
-        guard isInitialized else {
-            print("⚠️ [AppFig] AppFig not initialized. Call initialize() first.")
-            return nil
-        }
+        return queue.sync {
+            guard isInitialized else {
+                print("⚠️ [AppFig] AppFig not initialized. Call initialize() first.")
+                return nil
+            }
 
-        // Check if rules need refreshing (automatic updating)
-        checkAndTriggerAutoRefresh()
+            // Check if rules need refreshing (automatic updating)
+            checkAndTriggerAutoRefresh()
 
-        // Return cached value if exists
-        if let value = features[feature] {
-            return value
-        }
+            // Return cached value if exists
+            if let value = features[feature] {
+                return value
+            }
 
-        // Evaluate on-demand if not cached
-        for rule in rules {
-            if rule.feature == feature {
-                let passed = evaluateConditions(rule.conditions)
-                if passed {
-                    let value = resolveRuleValue(rule)
-                    features[feature] = value
-                    return value
+            // Evaluate on-demand if not cached
+            for rule in rules {
+                if rule.feature == feature {
+                    let passed = evaluateConditions(rule.conditions)
+                    if passed {
+                        let value = resolveRuleValue(rule)
+                        features[feature] = value
+                        return value
+                    }
                 }
             }
-        }
 
-        // No matching rule found
-        features[feature] = nil
-        return nil
+            // No matching rule found
+            features[feature] = nil
+            return nil
+        }
     }
 
     private static func checkAndTriggerAutoRefresh() {
