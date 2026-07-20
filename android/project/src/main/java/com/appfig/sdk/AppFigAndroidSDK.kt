@@ -1673,7 +1673,7 @@ object AppFig {
         if (hasValidABTest(rule)) {
             return selectVariant(userId, rule.ab_test!!.experiment_key, rule.ab_test.variants)
         }
-        return rule.value ?: "on"
+        return rule.value?.toString() ?: "on"
     }
 
     private fun selectVariant(userId: String?, experimentKey: String, variants: List<ABTestVariant>): String? {

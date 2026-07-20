@@ -1482,7 +1482,8 @@ public class AppFig {
         if hasValidABTest(rule) {
             return selectVariant(userId: userId, experimentKey: rule.ab_test!.experiment_key, variants: rule.ab_test!.variants)
         }
-        return rule.value ?? "on"
+        guard let value = rule.value else { return "on" }
+        return String(describing: value)
     }
 
     private static func selectVariant(userId: String?, experimentKey: String, variants: [ABTestVariant]) -> String? {
