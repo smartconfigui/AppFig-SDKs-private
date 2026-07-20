@@ -39,103 +39,93 @@
 import Foundation
 import UIKit
 
-/**
- * Analytics Provider Protocol
- */
-public protocol IAnalyticsProvider {
-    /**
-     * Set a user property in the analytics provider
-     * - Parameter key: Property name (e.g., "appfig_experiments")
-     * - Parameter value: Property value (e.g., "exp1:variant1|exp2:variant2")
-     */
-    func setUserProperty(key: String, value: String)
-}
-
-/**
- * Amplitude Analytics Provider for iOS.
- * Expects an instance responding to setUserProperties: (e.g. Amplitude.instance()).
- */
-public class AmplitudeProvider: IAnalyticsProvider {
-    private let amplitude: NSObject
-    private let selector = NSSelectorFromString("setUserProperties:")
-
-    public init(amplitude: NSObject) {
-        self.amplitude = amplitude
-        if !amplitude.responds(to: selector) {
-            print("[AppFig] Amplitude instance does not respond to setUserProperties:")
-        }
-    }
-
-    public func setUserProperty(key: String, value: String) {
-        guard amplitude.responds(to: selector) else { return }
-        _ = amplitude.perform(selector, with: [key: value] as NSDictionary)
-    }
-}
-
-/**
- * Firebase Analytics Provider for iOS.
- * Expects an instance responding to setUserProperty:forName:
- * (Firebase's Analytics API is class-based; pass a thin NSObject wrapper,
- * or use a custom IAnalyticsProvider that calls Analytics.setUserProperty directly).
- */
-public class FirebaseProvider: IAnalyticsProvider {
-    private let firebase: NSObject
-    private let selector = NSSelectorFromString("setUserProperty:forName:")
-
-    public init(firebase: NSObject) {
-        self.firebase = firebase
-        if !firebase.responds(to: selector) {
-            print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
-        }
-    }
-
-    public func setUserProperty(key: String, value: String) {
-        guard firebase.responds(to: selector) else { return }
-        _ = firebase.perform(selector, with: value as NSString, with: key as NSString)
-    }
-}
-
-/**
- * Mixpanel Analytics Provider for iOS.
- * Expects an instance whose `people` object responds to set:
- * (e.g. Mixpanel.mainInstance()).
- */
-public class MixpanelProvider: IAnalyticsProvider {
-    private let people: NSObject?
-    private let setSelector = NSSelectorFromString("set:")
-
-    public init(mixpanel: NSObject) {
-        let peopleSelector = NSSelectorFromString("people")
-        if mixpanel.responds(to: peopleSelector),
-           let peopleObject = mixpanel.perform(peopleSelector)?.takeUnretainedValue() as? NSObject {
-            people = peopleObject
-        } else {
-            people = nil
-            print("[AppFig] Mixpanel instance does not expose people")
-        }
-    }
-
-    public func setUserProperty(key: String, value: String) {
-        guard let people = people, people.responds(to: setSelector) else { return }
-        _ = people.perform(setSelector, with: [key: value] as NSDictionary)
-    }
-}
-
-/**
- * Null Analytics Provider for iOS
- * No-op implementation used when no provider is registered
- */
-public class NullAnalyticsProvider: IAnalyticsProvider {
-    public init() {}
-
-    public func setUserProperty(key: String, value: String) {
-        // No-op
-    }
-}
-
 /// Main AppFig SDK class
 /// Thread-safe static class for managing feature flags and remote configuration
 public class AppFig {
+
+    // MARK: - Analytics Provider Protocol & Implementations
+
+    /// Analytics Provider Protocol for forwarding A/B test assignments
+    public protocol AnalyticsProvider {
+        /// Set a user property in the analytics provider
+        /// - Parameter key: Property name (e.g., "appfig_experiments")
+        /// - Parameter value: Property value (e.g., "exp1:variant1|exp2:variant2")
+        func setUserProperty(key: String, value: String)
+    }
+
+    /// Amplitude Analytics Provider for iOS.
+    /// Expects an instance responding to setUserProperties: (e.g. Amplitude.instance()).
+    public class AmplitudeProvider: AnalyticsProvider {
+        private let amplitude: NSObject
+        private let selector = NSSelectorFromString("setUserProperties:")
+
+        public init(amplitude: NSObject) {
+            self.amplitude = amplitude
+            if !amplitude.responds(to: selector) {
+                print("[AppFig] Amplitude instance does not respond to setUserProperties:")
+            }
+        }
+
+        public func setUserProperty(key: String, value: String) {
+            guard amplitude.responds(to: selector) else { return }
+            _ = amplitude.perform(selector, with: [key: value] as NSDictionary)
+        }
+    }
+
+    /// Firebase Analytics Provider for iOS.
+    /// Expects an instance responding to setUserProperty:forName:
+    /// (Firebase's Analytics API is class-based; pass a thin NSObject wrapper,
+    /// or use a custom AnalyticsProvider that calls Analytics.setUserProperty directly).
+    public class FirebaseProvider: AnalyticsProvider {
+        private let firebase: NSObject
+        private let selector = NSSelectorFromString("setUserProperty:forName:")
+
+        public init(firebase: NSObject) {
+            self.firebase = firebase
+            if !firebase.responds(to: selector) {
+                print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
+            }
+        }
+
+        public func setUserProperty(key: String, value: String) {
+            guard firebase.responds(to: selector) else { return }
+            _ = firebase.perform(selector, with: value as NSString, with: key as NSString)
+        }
+    }
+
+    /// Mixpanel Analytics Provider for iOS.
+    /// Expects an instance whose `people` object responds to set:
+    /// (e.g. Mixpanel.mainInstance()).
+    public class MixpanelProvider: AnalyticsProvider {
+        private let people: NSObject?
+        private let setSelector = NSSelectorFromString("set:")
+
+        public init(mixpanel: NSObject) {
+            let peopleSelector = NSSelectorFromString("people")
+            if mixpanel.responds(to: peopleSelector),
+               let peopleObject = mixpanel.perform(peopleSelector)?.takeUnretainedValue() as? NSObject {
+                people = peopleObject
+            } else {
+                people = nil
+                print("[AppFig] Mixpanel instance does not expose people")
+            }
+        }
+
+        public func setUserProperty(key: String, value: String) {
+            guard let people = people, people.responds(to: setSelector) else { return }
+            _ = people.perform(setSelector, with: [key: value] as NSDictionary)
+        }
+    }
+
+    /// Null Analytics Provider for iOS
+    /// No-op implementation used when no provider is registered
+    public class NullAnalyticsProvider: AnalyticsProvider {
+        public init() {}
+
+        public func setUserProperty(key: String, value: String) {
+            // No-op
+        }
+    }
 
     // MARK: - Constants
 
@@ -235,9 +225,9 @@ public class AppFig {
     private static var userId: String? = nil
 
     // Analytics integration
-    private static var analyticsProvider: IAnalyticsProvider = NullAnalyticsProvider()
+    private static var analyticsProviders: [AnalyticsProvider] = []
     private static var activeExperiments: [String: String] = [:] // experimentKey -> variantName
-    private static var lastSyncedExperiments: String = "" // last value sent to the analytics provider
+    private static var lastSyncedExperiments: String = "" // last value sent to the analytics providers
     private static var rulesExperimentKeys: Set<String> = [] // experiment keys in current rules (rebuilt in buildIndexes)
 
     private class FeatureListener: Hashable {
@@ -753,13 +743,23 @@ public class AppFig {
     /// Register an analytics provider for tracking variant assignments
     ///
     /// - Parameter provider: Analytics provider implementation
-    public static func registerAnalyticsProvider(_ provider: IAnalyticsProvider) {
+    public static func registerAnalyticsProvider(_ provider: AnalyticsProvider) {
         queue.async(flags: .barrier) {
-            analyticsProvider = provider
+            analyticsProviders.append(provider)
             log(.info, "Analytics provider registered")
             // The new provider has never received the property; force a fresh sync
             lastSyncedExperiments = ""
             syncExperimentsToAnalytics()
+        }
+    }
+
+    /// Unregister an analytics provider
+    ///
+    /// - Parameter provider: Analytics provider implementation to remove
+    public static func unregisterAnalyticsProvider(_ provider: AnalyticsProvider) {
+        queue.async(flags: .barrier) {
+            analyticsProviders.removeAll { $0 === provider }
+            log(.info, "Analytics provider unregistered")
         }
     }
 
@@ -768,7 +768,7 @@ public class AppFig {
             .map { key, variant in "\(key):\(variant)" }
             .joined(separator: "|")
 
-        // Only call the provider when the value actually changed. An empty string
+        // Only call the providers when the value actually changed. An empty string
         // is a real update: it clears the property after the last experiment is
         // removed (ghost test purging).
         if experimentPairs == lastSyncedExperiments {
@@ -776,7 +776,9 @@ public class AppFig {
         }
 
         lastSyncedExperiments = experimentPairs
-        analyticsProvider.setUserProperty(key: "appfig_experiments", value: experimentPairs)
+        for provider in analyticsProviders {
+            provider.setUserProperty(key: "appfig_experiments", value: experimentPairs)
+        }
     }
 
     /// Reset a specific feature's cached value and force re-evaluation
@@ -1030,6 +1032,8 @@ public class AppFig {
         setDeviceProperty(key: "os_version", value: UIDevice.current.systemVersion)
         setDeviceProperty(key: "device_model", value: UIDevice.current.model)
         setDeviceProperty(key: "sdk_version", value: "2.0.0")
+        setDeviceProperty(key: "language", value: getLanguage())
+        setDeviceProperty(key: "timezone", value: getTimezone())
 
         // Get app version
         if let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String {
@@ -1038,6 +1042,49 @@ public class AppFig {
 
         // Country will be auto-detected from CDN response headers during rules fetch
         // For local mode, detectCountryFromCDN() must be called separately
+    }
+
+    // Maps an ISO 639-1 language code (plus script/region for Chinese) to the same
+    // English names Unity's SystemLanguage.ToString() produces, for cross-platform parity.
+    private static let languageCodeMap: [String: String] = [
+        "af": "Afrikaans", "ar": "Arabic", "eu": "Basque", "be": "Belarusian",
+        "bg": "Bulgarian", "ca": "Catalan", "cs": "Czech", "da": "Danish",
+        "nl": "Dutch", "en": "English", "et": "Estonian", "fo": "Faroese",
+        "fi": "Finnish", "fr": "French", "de": "German", "el": "Greek",
+        "he": "Hebrew", "iw": "Hebrew", "hi": "Hindi", "hu": "Hungarian",
+        "is": "Icelandic", "id": "Indonesian", "in": "Indonesian", "it": "Italian",
+        "ja": "Japanese", "ko": "Korean", "lv": "Latvian", "lt": "Lithuanian",
+        "no": "Norwegian", "nb": "Norwegian", "nn": "Norwegian", "pl": "Polish",
+        "pt": "Portuguese", "ro": "Romanian", "ru": "Russian", "sr": "SerboCroatian",
+        "hr": "SerboCroatian", "bs": "SerboCroatian", "sk": "Slovak", "sl": "Slovenian",
+        "es": "Spanish", "sv": "Swedish", "th": "Thai", "tr": "Turkish",
+        "uk": "Ukrainian", "vi": "Vietnamese"
+    ]
+
+    // Uses Locale.preferredLanguages (string parsing only) rather than the
+    // Locale.Language/.script struct API, which requires iOS 16+ and would break
+    // this SDK's iOS 12 deployment target.
+    private static func getLanguage() -> String {
+        guard let preferred = Locale.preferredLanguages.first else {
+            return "Unknown"
+        }
+
+        let components = preferred.split(separator: "-").map(String.init)
+        guard let languageCode = components.first?.lowercased() else {
+            return "Unknown"
+        }
+
+        if languageCode == "zh" {
+            let rest = components.dropFirst().map { $0.lowercased() }
+            let isTraditional = rest.contains("hant") || rest.contains("tw") || rest.contains("hk") || rest.contains("mo")
+            return isTraditional ? "ChineseTraditional" : "ChineseSimplified"
+        }
+
+        return languageCodeMap[languageCode] ?? "Unknown"
+    }
+
+    private static func getTimezone() -> String {
+        return TimeZone.current.identifier
     }
 
     private static func detectCountryFromCDN() {
@@ -2222,7 +2269,7 @@ struct ABTest: Codable {
 
 struct Rule: Codable {
     let feature: String
-    let value: String?
+    let value: AnyCodable?
     let ab_test: ABTest?
     let conditions: RuleConditions
 }
@@ -2316,7 +2363,7 @@ struct FeatureWrapper: Codable {
 }
 
 struct RuleSet: Codable {
-    let value: String?
+    let value: AnyCodable?
     let ab_test: ABTest?
     let conditions: RuleConditions
 }

@@ -249,9 +249,9 @@ object AppFig {
     private var userId: String? = null
 
     // Analytics integration
-    private var analyticsProvider: IAnalyticsProvider = NullAnalyticsProvider()
+    private val analyticsProviders = mutableListOf<IAnalyticsProvider>()
     private val activeExperiments = mutableMapOf<String, String>() // experimentKey -> variantName
-    private var lastSyncedExperiments: String = "" // last value sent to the analytics provider
+    private var lastSyncedExperiments: String = "" // last value sent to the analytics providers
     private val rulesExperimentKeys = mutableSetOf<String>() // experiment keys in current rules (rebuilt in buildIndexes)
 
     // Callbacks
@@ -867,11 +867,17 @@ object AppFig {
 
     @JvmStatic
     fun registerAnalyticsProvider(provider: IAnalyticsProvider) {
-        analyticsProvider = provider
+        analyticsProviders.add(provider)
         log(AppFigLogLevel.INFO, "Analytics provider registered")
         // The new provider has never received the property; force a fresh sync
         lastSyncedExperiments = ""
         syncExperimentsToAnalytics()
+    }
+
+    @JvmStatic
+    fun unregisterAnalyticsProvider(provider: IAnalyticsProvider) {
+        analyticsProviders.remove(provider)
+        log(AppFigLogLevel.INFO, "Analytics provider unregistered")
     }
 
     private fun syncExperimentsToAnalytics() {
@@ -879,7 +885,7 @@ object AppFig {
             "$key:$variant"
         }
 
-        // Only call the provider when the value actually changed. An empty string
+        // Only call the providers when the value actually changed. An empty string
         // is a real update: it clears the property after the last experiment is
         // removed (ghost test purging).
         if (experimentPairs == lastSyncedExperiments) {
@@ -887,7 +893,9 @@ object AppFig {
         }
 
         lastSyncedExperiments = experimentPairs
-        analyticsProvider.setUserProperty("appfig_experiments", experimentPairs)
+        for (provider in analyticsProviders) {
+            provider.setUserProperty("appfig_experiments", experimentPairs)
+        }
     }
 
     /**
@@ -1298,6 +1306,8 @@ object AppFig {
             setDeviceProperty("device_model", Build.MODEL)
             setDeviceProperty("device_brand", Build.BRAND)
             setDeviceProperty("sdk_version", "2.0.0")
+            setDeviceProperty("language", getLanguage())
+            setDeviceProperty("timezone", getTimezone())
 
             // Get app version
             try {
@@ -1310,6 +1320,41 @@ object AppFig {
             // Country will be auto-detected from CDN response headers during rules fetch
             // For local mode, detectCountryFromCDN() must be called separately
         }
+    }
+
+    // Maps an ISO 639-1 language code (plus script/region for Chinese) to the same
+    // English names Unity's SystemLanguage.toString() produces, for cross-platform parity.
+    private val languageCodeMap: Map<String, String> = mapOf(
+        "af" to "Afrikaans", "ar" to "Arabic", "eu" to "Basque", "be" to "Belarusian",
+        "bg" to "Bulgarian", "ca" to "Catalan", "cs" to "Czech", "da" to "Danish",
+        "nl" to "Dutch", "en" to "English", "et" to "Estonian", "fo" to "Faroese",
+        "fi" to "Finnish", "fr" to "French", "de" to "German", "el" to "Greek",
+        "he" to "Hebrew", "iw" to "Hebrew", "hi" to "Hindi", "hu" to "Hungarian",
+        "is" to "Icelandic", "id" to "Indonesian", "in" to "Indonesian", "it" to "Italian",
+        "ja" to "Japanese", "ko" to "Korean", "lv" to "Latvian", "lt" to "Lithuanian",
+        "no" to "Norwegian", "nb" to "Norwegian", "nn" to "Norwegian", "pl" to "Polish",
+        "pt" to "Portuguese", "ro" to "Romanian", "ru" to "Russian", "sr" to "SerboCroatian",
+        "hr" to "SerboCroatian", "bs" to "SerboCroatian", "sk" to "Slovak", "sl" to "Slovenian",
+        "es" to "Spanish", "sv" to "Swedish", "th" to "Thai", "tr" to "Turkish",
+        "uk" to "Ukrainian", "vi" to "Vietnamese"
+    )
+
+    private fun getLanguage(): String {
+        val locale = Locale.getDefault()
+        val languageCode = locale.language.lowercase()
+
+        if (languageCode == "zh") {
+            val script = locale.script.lowercase()
+            val country = locale.country.lowercase()
+            val isTraditional = script == "hant" || country == "tw" || country == "hk" || country == "mo"
+            return if (isTraditional) "ChineseTraditional" else "ChineseSimplified"
+        }
+
+        return languageCodeMap[languageCode] ?: "Unknown"
+    }
+
+    private fun getTimezone(): String {
+        return TimeZone.getDefault().id
     }
 
     private fun detectCountryFromCDN() {
@@ -2458,7 +2503,7 @@ object AppFig {
 
     data class Rule(
         val feature: String,
-        val value: String? = null,
+        val value: Any? = null,
         val ab_test: ABTest? = null,
         val conditions: RuleConditions
     )
@@ -2518,7 +2563,7 @@ object AppFig {
     )
 
     private data class RuleSet(
-        val value: String? = null,
+        val value: Any? = null,
         val ab_test: ABTest? = null,
         val conditions: RuleConditions
     )

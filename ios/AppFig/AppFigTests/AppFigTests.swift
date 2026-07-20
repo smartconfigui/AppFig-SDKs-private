@@ -6,7 +6,7 @@
 //
 
 import Testing
-@testable import AppFigSDK
+@testable import AppFig
 
 struct AppFigTests {
 

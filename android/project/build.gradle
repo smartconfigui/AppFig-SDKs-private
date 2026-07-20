@@ -59,3 +59,50 @@ dependencies {
 
     implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.22"
 }
+
+// ==================================================================================
+// PUBLISHING CONFIG - JitPack & Maven Central
+// ==================================================================================
+
+apply plugin: 'maven-publish'
+
+afterEvaluate {
+    publishing {
+        publications {
+            release(MavenPublication) {
+                from components.release
+
+                groupId = 'com.appfig'
+                artifactId = 'appfig-android'
+                version = '2.0.0'
+
+                pom {
+                    name = 'AppFig Android SDK'
+                    description = 'AppFig - Client-side feature flags and remote configuration for Android'
+                    url = 'https://appfig.com'
+
+                    licenses {
+                        license {
+                            name = 'Proprietary'
+                            url = 'https://appfig.com/license'
+                        }
+                    }
+
+                    developers {
+                        developer {
+                            id = 'appfig'
+                            name = 'AppFig'
+                            email = 'hello@appfig.com'
+                        }
+                    }
+
+                    scm {
+                        connection = 'scm:git:github.com/AppFig/AppFig-SDKs.git'
+                        developerConnection = 'scm:git:ssh://github.com/AppFig/AppFig-SDKs.git'
+                        url = 'https://github.com/AppFig/AppFig-SDKs/tree/main'
+                    }
+                }
+            }
+        }
+    }
+}

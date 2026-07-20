@@ -195,9 +195,9 @@ class AppFigCore {
   private variantAssignmentCache: Map<string, string> = new Map();
 
   // Analytics integration
-  private analyticsProvider: IAnalyticsProvider = new NullAnalyticsProvider();
+  private analyticsProviders: IAnalyticsProvider[] = [];
   private activeExperiments: Map<string, string> = new Map(); // experimentKey -> variantName
-  private lastSyncedExperiments: string = ''; // last value sent to the analytics provider
+  private lastSyncedExperiments: string = ''; // last value sent to the analytics providers
   private rulesExperimentKeys: Set<string> = new Set(); // experiment keys in current rules (rebuilt in buildIndex)
 
   // Callbacks and listeners
@@ -1121,11 +1121,16 @@ class AppFigCore {
   }
 
   public RegisterAnalyticsProvider(provider: IAnalyticsProvider): void {
-    this.analyticsProvider = provider;
+    this.analyticsProviders.push(provider);
     this.log('INFO', 'Analytics provider registered');
     // The new provider has never received the property; force a fresh sync
     this.lastSyncedExperiments = '';
     this.syncExperimentsToAnalytics();
+  }
+
+  public UnregisterAnalyticsProvider(provider: IAnalyticsProvider): void {
+    this.analyticsProviders = this.analyticsProviders.filter(p => p !== provider);
+    this.log('INFO', 'Analytics provider unregistered');
   }
 
   private syncExperimentsToAnalytics(): void {
@@ -1133,7 +1138,7 @@ class AppFigCore {
       .map(([key, variant]) => `${key}:${variant}`)
       .join('|');
 
-    // Only call the provider when the value actually changed. An empty string
+    // Only call the providers when the value actually changed. An empty string
     // is a real update: it clears the property after the last experiment is
     // removed (ghost test purging).
     if (experimentPairs === this.lastSyncedExperiments) {
@@ -1141,7 +1146,9 @@ class AppFigCore {
     }
 
     this.lastSyncedExperiments = experimentPairs;
-    this.analyticsProvider.setUserProperty('appfig_experiments', experimentPairs);
+    for (const provider of this.analyticsProviders) {
+      provider.setUserProperty('appfig_experiments', experimentPairs);
+    }
   }
 
   private detectPlatform(): string {
