@@ -38,7 +38,6 @@
 
 import Foundation
 import UIKit
-import os
 
 // MARK: - Analytics Provider Protocol & Implementations (Top-Level)
 
@@ -59,7 +58,7 @@ public class AppFigAnalyticsAmplitudeProvider: AppFigAnalyticsProvider {
     public init(amplitude: NSObject) {
         self.amplitude = amplitude
         if !amplitude.responds(to: selector) {
-            logger.warning("Amplitude instance does not respond to setUserProperties:")
+            NSLog("[WARN] %@", "Amplitude instance does not respond to setUserProperties:")
         }
     }
 
@@ -80,7 +79,7 @@ public class AppFigAnalyticsFirebaseProvider: AppFigAnalyticsProvider {
     public init(firebase: NSObject) {
         self.firebase = firebase
         if !firebase.responds(to: selector) {
-            logger.warning("Firebase instance does not respond to setUserProperty:forName:")
+            NSLog("[WARN] %@", "Firebase instance does not respond to setUserProperty:forName:")
         }
     }
 
@@ -104,7 +103,7 @@ public class AppFigAnalyticsMixpanelProvider: AppFigAnalyticsProvider {
             people = peopleObject
         } else {
             people = nil
-            logger.warning("Mixpanel instance does not expose people")
+            NSLog("[WARN] %@", "Mixpanel instance does not expose people")
         }
     }
 
@@ -137,7 +136,6 @@ public class AppFig {
     private static let defaultMaxEvents = 5000
     private static let defaultMaxEventAgeDays = 7
     private static let userDefaultsSuiteName = "com.appfig.sdk"
-    private static let logger = os.Logger(subsystem: "com.appfig.sdk", category: "AppFig")
 
     // MARK: - State Management
 
@@ -265,9 +263,9 @@ public class AppFig {
         // Errors and warnings always show
         if level == .warn || level == .error {
             if level == .error {
-                logger.error("\(message)")
+                NSLog("[ERROR] %@", "\(message)")
             } else {
-                logger.warning("\(message)")
+                NSLog("[WARN] %@", "\(message)")
             }
             return
         }
@@ -276,9 +274,9 @@ public class AppFig {
         guard debugMode else { return }
 
         if level == .info {
-            logger.info("\(message)")
+            NSLog("[INFO] %@", "\(message)")
         } else {
-            logger.debug("\(message)")
+            NSLog("[DEBUG] %@", "\(message)")
         }
     }
 
@@ -314,32 +312,32 @@ public class AppFig {
     ) {
         // Validate inputs
         guard !apiKey.isEmpty else {
-            logger.error("API key is required for remote mode. Use initializeLocal() for local development.")
+            NSLog("[ERROR] %@", "API key is required for remote mode. Use initializeLocal() for local development.")
             return
         }
 
         guard !companyId.isEmpty else {
-            logger.error("Company ID is required. This should be your Firestore company document ID.")
+            NSLog("[ERROR] %@", "Company ID is required. This should be your Firestore company document ID.")
             return
         }
 
         guard !tenantId.isEmpty else {
-            logger.error("Tenant ID is required. This should be your Firestore tenant document ID.")
+            NSLog("[ERROR] %@", "Tenant ID is required. This should be your Firestore tenant document ID.")
             return
         }
 
         if companyId.contains(" ") {
-            logger.error("Invalid company ID '\(companyId)' - IDs cannot contain spaces. Use the Firestore document ID.")
+            NSLog("[ERROR] %@", "Invalid company ID '\(companyId)' - IDs cannot contain spaces. Use the Firestore document ID.")
             return
         }
 
         if tenantId.contains(" ") {
-            logger.error("Invalid tenant ID '\(tenantId)' - IDs cannot contain spaces. Use the Firestore document ID.")
+            NSLog("[ERROR] %@", "Invalid tenant ID '\(tenantId)' - IDs cannot contain spaces. Use the Firestore document ID.")
             return
         }
 
         if companyId.count > 100 || tenantId.count > 100 {
-            logger.warning("Unusually long ID detected. Are you using the correct Firestore document IDs?")
+            NSLog("[WARN] %@", "Unusually long ID detected. Are you using the correct Firestore document IDs?")
         }
 
         // Initialize
@@ -371,15 +369,15 @@ public class AppFig {
             self.maxEventAgeDays = min(max(maxEventAgeDays, 1), 365)
 
             if maxEvents != self.maxEvents {
-                logger.warning("maxEvents \(maxEvents) out of range. Clamped to \(self.maxEvents)")
+                NSLog("[WARN] %@", "maxEvents \(maxEvents) out of range. Clamped to \(self.maxEvents)")
             }
 
             if maxEventAgeDays != self.maxEventAgeDays {
-                logger.warning("maxEventAgeDays \(maxEventAgeDays) out of range. Clamped to \(self.maxEventAgeDays)")
+                NSLog("[WARN] %@", "maxEventAgeDays \(maxEventAgeDays) out of range. Clamped to \(self.maxEventAgeDays)")
             }
 
             if self.maxEvents > 10000 {
-                logger.warning("Large event limit (\(self.maxEvents)) may impact memory and storage.")
+                NSLog("[WARN] %@", "Large event limit (\(self.maxEvents)) may impact memory and storage.")
             }
 
 
@@ -451,7 +449,7 @@ public class AppFig {
             // Load cached events from disk (same as cloud mode)
             self.loadCachedEvents()
 
-            logger.info("🏠 Initialized in LOCAL MODE")
+            NSLog("[INFO] %@", "🏠 Initialized in LOCAL MODE")
 
             if let rulesJson = rulesJson {
                 self.parseAndApplyRules(rulesJson)
@@ -460,7 +458,7 @@ public class AppFig {
                     self.onReadyCallback?()
                 }
             } else {
-                logger.warning("No rules provided for local mode. Features will return nil.")
+                NSLog("[WARN] %@", "No rules provided for local mode. Features will return nil.")
             }
 
             self.isInitialized = true
@@ -477,7 +475,7 @@ public class AppFig {
     ///   - parameters: Optional event parameters as key-value pairs
     public static func logEvent(name: String, parameters: [String: String]? = nil) {
         guard isInitialized else {
-            logger.warning("AppFig not initialized. Call initialize() first.")
+            NSLog("[WARN] %@", "AppFig not initialized. Call initialize() first.")
             return
         }
 
@@ -490,7 +488,7 @@ public class AppFig {
             self.eventHistory.append(event)
             self.eventCounts[name, default: 0] += 1
 
-            logger.info("📝 Event logged: '\(name)' (count: \(self.eventCounts[name] ?? 0), total events: \(self.eventHistory.count))")
+            NSLog("[INFO] %@", "📝 Event logged: '\(name)' (count: \(self.eventCounts[name] ?? 0), total events: \(self.eventHistory.count))")
 
             // Trim old events
             self.trimEventHistory()
@@ -539,7 +537,7 @@ public class AppFig {
             self.trackUserPropertySchema(props: [key: value])
 
 
-            logger.info("👤 User property set: \(key) = \(value)")
+            NSLog("[INFO] %@", "👤 User property set: \(key) = \(value)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -557,7 +555,7 @@ public class AppFig {
             if let affectedFeatures = self.userPropertyToFeaturesIndex[key] {
             }
 
-            logger.info("👤 User property removed: \(key)")
+            NSLog("[INFO] %@", "👤 User property removed: \(key)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -579,7 +577,7 @@ public class AppFig {
             self.trackDevicePropertySchema(props: [key: value])
 
 
-            logger.info("📱 Device property set: \(key) = \(value)")
+            NSLog("[INFO] %@", "📱 Device property set: \(key) = \(value)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -595,7 +593,7 @@ public class AppFig {
             self.deviceProperties.removeValue(forKey: key)
 
 
-            logger.info("📱 Device property removed: \(key)")
+            NSLog("[INFO] %@", "📱 Device property removed: \(key)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -620,7 +618,7 @@ public class AppFig {
     @available(*, deprecated, message: "Country is now automatically detected from CDN response headers during rules fetch.")
     public static func detectAndSetCountry(completion: ((String?) -> Void)? = nil) {
         guard let url = URL(string: "https://rules-dev.appfig.com/rules_versions/country/country/dev/current/latest.json") else {
-            logger.error("Invalid country detection URL")
+            NSLog("[ERROR] %@", "Invalid country detection URL")
             completion?(nil)
             return
         }
@@ -662,7 +660,7 @@ public class AppFig {
     public static func getFeatureValue(_ feature: String) -> String? {
         return queue.sync {
             guard isInitialized else {
-                logger.warning("AppFig not initialized. Call initialize() first.")
+                NSLog("[WARN] %@", "AppFig not initialized. Call initialize() first.")
                 return nil
             }
 
@@ -964,12 +962,12 @@ public class AppFig {
     /// Useful for implementing pull-to-refresh or manual update buttons
     public static func refreshRules() {
         guard !useLocalMode else {
-            logger.warning("Cannot refresh in local mode")
+            NSLog("[WARN] %@", "Cannot refresh in local mode")
             return
         }
 
         guard isInitialized else {
-            logger.warning("Cannot refresh: AppFig not initialized")
+            NSLog("[WARN] %@", "Cannot refresh: AppFig not initialized")
             return
         }
 
@@ -989,7 +987,7 @@ public class AppFig {
         defaults.removeObject(forKey: getCacheKey(companyId, tenantId, env, "Rules"))
         defaults.removeObject(forKey: getCacheKey(companyId, tenantId, env, "Hash"))
         defaults.removeObject(forKey: getCacheKey(companyId, tenantId, env, "Timestamp"))
-        logger.info("🗑️ Cache cleared for \(companyId)/\(tenantId)/\(env)")
+        NSLog("[INFO] %@", "🗑️ Cache cleared for \(companyId)/\(tenantId)/\(env)")
     }
 
     /// Clear event history
@@ -1004,7 +1002,7 @@ public class AppFig {
             for (_, affectedFeatures) in self.eventToFeaturesIndex {
             }
 
-            logger.info("🗑️ Event history cleared, re-evaluating all features")
+            NSLog("[INFO] %@", "🗑️ Event history cleared, re-evaluating all features")
 
             // Immediately re-evaluate all features
             self.evaluateAllFeatures()
@@ -1099,7 +1097,7 @@ public class AppFig {
 
     private static func detectCountryFromCDN() {
         guard let url = URL(string: "https://rules-dev.appfig.com/rules_versions/country/country/dev/current/latest.json") else {
-            logger.error("Invalid standalone country detection URL")
+            NSLog("[ERROR] %@", "Invalid standalone country detection URL")
             return
         }
 
@@ -1109,7 +1107,7 @@ public class AppFig {
         let task = urlSession.dataTask(with: request) { _, response, _ in
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                logger.warning("Invalid response from country detection endpoint")
+                NSLog("[WARN] %@", "Invalid response from country detection endpoint")
                 return
             }
 
@@ -1121,7 +1119,7 @@ public class AppFig {
                 } else {
                 }
             } else {
-                logger.warning("Country detection endpoint returned HTTP \(httpResponse.statusCode)")
+                NSLog("[WARN] %@", "Country detection endpoint returned HTTP \(httpResponse.statusCode)")
             }
         }
 
@@ -1176,7 +1174,7 @@ public class AppFig {
         }
 
         guard let url = URL(string: pointerUrl) else {
-            logger.error("Invalid pointer URL")
+            NSLog("[ERROR] %@", "Invalid pointer URL")
             queue.async(flags: .barrier) { self.isFetchInProgress = false }
             completion?()
             return
@@ -1190,7 +1188,7 @@ public class AppFig {
         let task = urlSession.dataTask(with: request) { data, response, error in
             if let error = error {
                 let errorMsg = "Failed to fetch pointer: \(error.localizedDescription)"
-                logger.error(errorMsg)
+                NSLog("[ERROR] %@", errorMsg)
                 DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
@@ -1198,22 +1196,22 @@ public class AppFig {
             }
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                logger.error("Invalid response from pointer URL")
+                NSLog("[ERROR] %@", "Invalid response from pointer URL")
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
             }
 
             guard httpResponse.statusCode == 200 else {
-                logger.error("Failed to fetch pointer: HTTP \(httpResponse.statusCode)")
-                logger.error("Verify your companyId ('\(AppFig.companyId)') and tenantId ('\(AppFig.tenantId)') are correct Firestore document IDs")
+                NSLog("[ERROR] %@", "Failed to fetch pointer: HTTP \(httpResponse.statusCode)")
+                NSLog("[ERROR] %@", "Verify your companyId ('\(AppFig.companyId)') and tenantId ('\(AppFig.tenantId)') are correct Firestore document IDs")
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
             }
 
             guard let data = data else {
-                logger.error("Empty response from pointer URL")
+                NSLog("[ERROR] %@", "Empty response from pointer URL")
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
@@ -1269,7 +1267,7 @@ public class AppFig {
 
             } catch {
                 let errorMsg = "Failed to parse pointer JSON: \(error)"
-                logger.error(errorMsg)
+                NSLog("[ERROR] %@", errorMsg)
                 DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
@@ -1281,7 +1279,7 @@ public class AppFig {
 
     private static func fetchImmutableRules(immutableUrl: String, hash: String, completion: (() -> Void)? = nil) {
         guard let url = URL(string: immutableUrl) else {
-            logger.error("Invalid immutable URL")
+            NSLog("[ERROR] %@", "Invalid immutable URL")
             completion?()
             return
         }
@@ -1292,7 +1290,7 @@ public class AppFig {
         let task = urlSession.dataTask(with: request) { data, response, error in
             if let error = error {
                 let errorMsg = "Failed to fetch immutable rules: \(error.localizedDescription)"
-                logger.error(errorMsg)
+                NSLog("[ERROR] %@", errorMsg)
                 DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
@@ -1300,7 +1298,7 @@ public class AppFig {
 
             guard let httpResponse = response as? HTTPURLResponse else {
                 let errorMsg = "Invalid response from immutable URL"
-                logger.error(errorMsg)
+                NSLog("[ERROR] %@", errorMsg)
                 DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
@@ -1308,7 +1306,7 @@ public class AppFig {
 
             guard httpResponse.statusCode == 200 else {
                 let errorMsg = "Failed to fetch immutable rules: HTTP \(httpResponse.statusCode)"
-                logger.error(errorMsg)
+                NSLog("[ERROR] %@", errorMsg)
                 DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
@@ -1316,7 +1314,7 @@ public class AppFig {
 
             guard let data = data, let rulesJson = String(data: data, encoding: .utf8) else {
                 let errorMsg = "Empty response from immutable URL"
-                logger.error(errorMsg)
+                NSLog("[ERROR] %@", errorMsg)
                 DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
@@ -1346,7 +1344,7 @@ public class AppFig {
 
     private static func parseAndApplyRules(_ rulesJson: String, fireCallback: Bool = false) {
         guard let data = rulesJson.data(using: .utf8) else {
-            logger.error("Failed to convert rules JSON to data")
+            NSLog("[ERROR] %@", "Failed to convert rules JSON to data")
             return
         }
 
@@ -1385,7 +1383,7 @@ public class AppFig {
                 // Wrap the JSON in a features key and retry
                 let wrappedJson = "{\"features\": \(rulesJson)}"
                 guard let wrappedData = wrappedJson.data(using: .utf8) else {
-                    logger.error("Failed to create wrapped JSON")
+                    NSLog("[ERROR] %@", "Failed to create wrapped JSON")
                     return
                 }
 
@@ -1415,8 +1413,8 @@ public class AppFig {
 
 
             } catch {
-                logger.error("Failed to parse rules JSON in both formats: \(error)")
-                logger.error("Expected format: {\"features\": {\"feature_name\": [...rules]}}")
+                NSLog("[ERROR] %@", "Failed to parse rules JSON in both formats: \(error)")
+                NSLog("[ERROR] %@", "Expected format: {\"features\": {\"feature_name\": [...rules]}}")
             }
         }
     }
@@ -1928,7 +1926,7 @@ public class AppFig {
             if sequenceMatched {
                 return true
             } else {
-                logger.warning("Direct sequence failed starting at index \(startIdx), trying next position")
+                NSLog("[WARN] %@", "Direct sequence failed starting at index \(startIdx), trying next position")
             }
         }
 
@@ -2126,11 +2124,11 @@ public class AppFig {
                 let range = NSRange(actualStr.startIndex..., in: actualStr)
                 return regex.firstMatch(in: actualStr, options: [], range: range) != nil
             } catch {
-                logger.warning("Invalid regex pattern: \(expectedStr)")
+                NSLog("[WARN] %@", "Invalid regex pattern: \(expectedStr)")
                 return false
             }
         default:
-            logger.warning("Unknown operator: \(op)")
+            NSLog("[WARN] %@", "Unknown operator: \(op)")
             return false
         }
     }
@@ -2205,7 +2203,7 @@ public class AppFig {
             }
 
         } catch {
-            logger.warning("Failed to load cached events: \(error)")
+            NSLog("[WARN] %@", "Failed to load cached events: \(error)")
         }
     }
 
@@ -2236,7 +2234,7 @@ public class AppFig {
     private static func saveCachedEvents() {
         // Validate we have company/tenant/env info (required for cache keys)
         if companyId.isEmpty || tenantId.isEmpty || env.isEmpty {
-            logger.warning("Cannot save events: missing companyId/tenantId/env info")
+            NSLog("[WARN] %@", "Cannot save events: missing companyId/tenantId/env info")
             return
         }
 
@@ -2247,7 +2245,7 @@ public class AppFig {
             let data = try JSONEncoder().encode(eventHistory)
             defaults.set(data, forKey: eventsKey)
         } catch {
-            logger.warning("Failed to save cached events: \(error)")
+            NSLog("[WARN] %@", "Failed to save cached events: \(error)")
         }
     }
 
