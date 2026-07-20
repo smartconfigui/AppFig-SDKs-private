@@ -1473,7 +1473,8 @@ object AppFig {
                 }
 
                 // Hash doesn't match - fetch immutable rules
-                val immutableUrl = "$cdnBaseUrl/rules_versions/$companyId/$tenantId/$environment/current/${pointer.version}.json"
+                val immutableUrl = pointer.path?.let { "$cdnBaseUrl/$it" }
+                    ?: "$cdnBaseUrl/rules_versions/$companyId/$tenantId/$environment/current/${pointer.version}.json"
                 fetchImmutableRules(immutableUrl, pointer.version, onComplete)
 
             } catch (e: Exception) {

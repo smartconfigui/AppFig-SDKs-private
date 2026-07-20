@@ -1254,7 +1254,8 @@ public class AppFig {
                     }
 
                     // Hash doesn't match - fetch immutable rules
-                    let immutableUrl = "\(AppFig.cdnBaseUrl)/rules_versions/\(AppFig.companyId)/\(AppFig.tenantId)/\(AppFig.env)/current/\(pointer.version).json"
+                    let immutableUrl = pointer.path.map { "\(AppFig.cdnBaseUrl)/\($0)" }
+                      ?? "\(AppFig.cdnBaseUrl)/rules_versions/\(AppFig.companyId)/\(AppFig.tenantId)/\(AppFig.env)/current/\(pointer.version).json"
                     AppFig.fetchImmutableRules(immutableUrl: immutableUrl, hash: pointer.version, completion: completion)
                 }
 

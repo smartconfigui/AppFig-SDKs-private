@@ -815,7 +815,9 @@ class AppFigCore {
 
       // Fetch immutable rules file
       this.log('INFO', 'Rules updated from server');
-      const immutableUrl = `${this.cdnBaseUrl}/rules_versions/${this.companyId}/${this.tenantId}/${this.env}/current/${newHash}.json`;
+      const immutableUrl = pointer.path
+        ? `${this.cdnBaseUrl}/${pointer.path}`
+        : `${this.cdnBaseUrl}/rules_versions/${this.companyId}/${this.tenantId}/${this.env}/current/${newHash}.json`;
 
       const rulesResponse = await fetch(immutableUrl);
 
