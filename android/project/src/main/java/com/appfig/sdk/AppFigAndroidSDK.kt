@@ -1699,18 +1699,15 @@ object AppFig {
      * Format value for output: if Double is actually an integer (99.0), output as integer (99).
      * Matches iOS AnyCodable behavior which tries Int first, then Double.
      */
-    private fun formatValue(value: Any?): String? {
+    private fun formatValue(value: Any?): Any? {
         if (value == null) return null
         if (value is Double) {
             // If Double is a whole number, format as Long to avoid .0 suffix
             if (value % 1.0 == 0.0 && value.isFinite()) {
-                return value.toLong().toString()
+                return value.toLong()
             }
         }
-        if (value is Number) {
-            return value.toString()
-        }
-        return value.toString()
+        return value
     }
 
     private fun selectVariant(userId: String?, experimentKey: String, variants: List<ABTestVariant>): String? {
