@@ -470,9 +470,7 @@ public class AppFig {
     ///   - name: Name of the event
     ///   - parameters: Optional event parameters as key-value pairs
     public static func logEvent(name: String, parameters: [String: String]? = nil) {
-        // Synchronized check before queue dispatch
-        let initialized = queue.sync { isInitialized }
-        guard initialized else {
+        guard isInitialized else {
             print("⚠️ [AppFig] AppFig not initialized. Call initialize() first.")
             return
         }
