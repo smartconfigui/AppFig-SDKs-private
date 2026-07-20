@@ -1692,7 +1692,25 @@ object AppFig {
         if (hasValidABTest(rule)) {
             return selectVariant(userId, rule.ab_test!!.experiment_key, rule.ab_test.variants)
         }
-        return rule.value?.toString() ?: "on"
+        return formatValue(rule.value) ?: "on"
+    }
+
+    /**
+     * Format value for output: if Double is actually an integer (99.0), output as integer (99).
+     * Matches iOS AnyCodable behavior which tries Int first, then Double.
+     */
+    private fun formatValue(value: Any?): String? {
+        if (value == null) return null
+        if (value is Double) {
+            // If Double is a whole number, format as Long to avoid .0 suffix
+            if (value % 1.0 == 0.0 && value.isFinite()) {
+                return value.toLong().toString()
+            }
+        }
+        if (value is Number) {
+            return value.toString()
+        }
+        return value.toString()
     }
 
     private fun selectVariant(userId: String?, experimentKey: String, variants: List<ABTestVariant>): String? {
@@ -2006,7 +2024,7 @@ object AppFig {
                 val hasMatchingEvent = matchingEvents.any { event ->
                     condition.param.all { (paramKey, opValue) ->
                         val eventValue = event.parameters[paramKey]
-                        eventValue != null && compareValue(eventValue, opValue.operator, opValue.value.toString())
+                        eventValue != null && compareValue(eventValue, opValue.operator, formatValue(opValue.value))
                     }
                 }
                 if (!hasMatchingEvent) {
@@ -2208,7 +2226,7 @@ object AppFig {
 
         return step.param.all { (paramKey, opValue) ->
             val actualValue = event.parameters[paramKey]
-            actualValue != null && compareValue(actualValue, opValue.operator, opValue.value.toString())
+            actualValue != null && compareValue(actualValue, opValue.operator, formatValue(opValue.value))
         }
     }
 
