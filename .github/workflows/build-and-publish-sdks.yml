@@ -7,7 +7,7 @@ on:
       - main
 
 env:
-  PUBLIC_REPO: AppFig/AppFig-SDKs
+  PUBLIC_REPO: smartconfigui/AppFig-SDKs
   PUBLIC_BRANCH: main
 
 jobs:
