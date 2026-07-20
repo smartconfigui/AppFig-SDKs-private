@@ -1302,13 +1302,18 @@ public class AppFig {
                 return
             }
 
-            // Parse and apply rules
-            AppFig.parseAndApplyRules(rulesJson, fireCallback: true)
+            // Parse and apply rules without firing callback yet
+            AppFig.parseAndApplyRules(rulesJson, fireCallback: false)
 
-            // Save to cache
+            // Save to cache AND fire callback in single barrier block
             AppFig.queue.async(flags: .barrier) {
                 AppFig.saveCachedRules(rulesJson, hash: hash)
                 AppFig.isFetchInProgress = false
+
+                // Fire callback AFTER state is fully written
+                DispatchQueue.main.async {
+                    AppFig.onRulesUpdatedCallback?()
+                }
             }
 
             DispatchQueue.main.async {

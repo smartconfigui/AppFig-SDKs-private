@@ -831,13 +831,14 @@ class AppFigCore {
       this.rules = rulesData.features;
       this.currentHash = newHash;
 
+      // Save to cache BEFORE firing callback
       await this.saveCachedRules(rulesData, newHash);
 
       // Build index and evaluate once
       this.buildIndex();
       this.evaluateAllFeatures();
 
-      // Fire onRulesUpdated callback
+      // Fire onRulesUpdated callback AFTER all state is written
       this.onRulesUpdatedCallback?.();
     } catch (err) {
       this.log('WARN', 'Failed to fetch remote rules – using cached version');

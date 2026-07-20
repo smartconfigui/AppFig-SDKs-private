@@ -1518,13 +1518,13 @@ object AppFig {
 
             // Save to cache
             saveCachedRules(rulesJson, hash)
+            isFetchInProgress = false
 
-            // Fire onRulesUpdated callback
+            // Fire onRulesUpdated callback AFTER state is fully written
             mainHandler.post {
                 onRulesUpdatedCallback?.invoke()
                 onComplete?.invoke()
             }
-            isFetchInProgress = false
 
         } catch (e: Exception) {
             log(AppFigLogLevel.WARN, "Failed to fetch remote rules – using cached version")
