@@ -1229,26 +1229,24 @@ public class AppFig {
                     }
                 }
 
-                AppFig.queue.sync {
+                AppFig.queue.async(flags: .barrier) {
                     let cachedHash = AppFig.getCachedHash()
                     if let cachedHash = cachedHash, cachedHash == pointer.version {
                         // Hash matches - use cached rules
-                        AppFig.queue.async(flags: .barrier) {
-                            AppFig.saveCacheTimestamp()
+                        AppFig.saveCacheTimestamp()
 
-                            // Build index and evaluate once
-                            AppFig.buildIndexes()
-                            for rule in AppFig.rules {
-                            }
-                            AppFig.evaluateAllFeatures()
-
-                            // Fire onReady callback
-                            DispatchQueue.main.async {
-                                AppFig.onReadyCallback?()
-                            }
-
-                            AppFig.isFetchInProgress = false
+                        // Build index and evaluate once
+                        AppFig.buildIndexes()
+                        for rule in AppFig.rules {
                         }
+                        AppFig.evaluateAllFeatures()
+
+                        // Fire onReady callback
+                        DispatchQueue.main.async {
+                            AppFig.onReadyCallback?()
+                        }
+
+                        AppFig.isFetchInProgress = false
                         completion?()
                         return
                     }
@@ -1303,7 +1301,6 @@ public class AppFig {
                 completion?()
                 return
             }
-
 
             // Parse and apply rules
             AppFig.parseAndApplyRules(rulesJson, fireCallback: true)
