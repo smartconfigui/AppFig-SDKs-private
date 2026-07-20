@@ -38,6 +38,7 @@
 
 import Foundation
 import UIKit
+import os
 
 // MARK: - Analytics Provider Protocol & Implementations (Top-Level)
 
@@ -58,7 +59,7 @@ public class AppFigAnalyticsAmplitudeProvider: AppFigAnalyticsProvider {
     public init(amplitude: NSObject) {
         self.amplitude = amplitude
         if !amplitude.responds(to: selector) {
-            print("[AppFig] Amplitude instance does not respond to setUserProperties:")
+            logger.warning("Amplitude instance does not respond to setUserProperties:")
         }
     }
 
@@ -79,7 +80,7 @@ public class AppFigAnalyticsFirebaseProvider: AppFigAnalyticsProvider {
     public init(firebase: NSObject) {
         self.firebase = firebase
         if !firebase.responds(to: selector) {
-            print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
+            logger.warning("Firebase instance does not respond to setUserProperty:forName:")
         }
     }
 
@@ -103,7 +104,7 @@ public class AppFigAnalyticsMixpanelProvider: AppFigAnalyticsProvider {
             people = peopleObject
         } else {
             people = nil
-            print("[AppFig] Mixpanel instance does not expose people")
+            logger.warning("Mixpanel instance does not expose people")
         }
     }
 
@@ -136,6 +137,7 @@ public class AppFig {
     private static let defaultMaxEvents = 5000
     private static let defaultMaxEventAgeDays = 7
     private static let userDefaultsSuiteName = "com.appfig.sdk"
+    private static let logger = os.Logger(subsystem: "com.appfig.sdk", category: "AppFig")
 
     // MARK: - State Management
 
@@ -217,6 +219,7 @@ public class AppFig {
     // Callbacks and listeners
     private static var onReadyCallback: (() -> Void)?
     private static var onRulesUpdatedCallback: (() -> Void)?
+    private static var onErrorCallback: ((String) -> Void)?
     private static var onVariantAssignedCallback: ((String, String) -> Void)?
     private static var featureListeners: [String: Set<FeatureListener>] = [:]
 
@@ -262,9 +265,9 @@ public class AppFig {
         // Errors and warnings always show
         if level == .warn || level == .error {
             if level == .error {
-                print("[AppFig] ERROR: \(message)")
+                logger.error("\(message)")
             } else {
-                print("[AppFig] WARNING: \(message)")
+                logger.warning("\(message)")
             }
             return
         }
@@ -273,9 +276,9 @@ public class AppFig {
         guard debugMode else { return }
 
         if level == .info {
-            print("[AppFig] \(message)")
+            logger.info("\(message)")
         } else {
-            print("[AppFig:Debug] \(message)")
+            logger.debug("\(message)")
         }
     }
 
@@ -306,36 +309,37 @@ public class AppFig {
         maxEvents: Int = 5000,
         maxEventAgeDays: Int = 7,
         onReady: (() -> Void)? = nil,
-        onRulesUpdated: (() -> Void)? = nil
+        onRulesUpdated: (() -> Void)? = nil,
+        onError: ((String) -> Void)? = nil
     ) {
         // Validate inputs
         guard !apiKey.isEmpty else {
-            print("❌ [AppFig] API key is required for remote mode. Use initializeLocal() for local development.")
+            logger.error("API key is required for remote mode. Use initializeLocal() for local development.")
             return
         }
 
         guard !companyId.isEmpty else {
-            print("❌ [AppFig] Company ID is required. This should be your Firestore company document ID.")
+            logger.error("Company ID is required. This should be your Firestore company document ID.")
             return
         }
 
         guard !tenantId.isEmpty else {
-            print("❌ [AppFig] Tenant ID is required. This should be your Firestore tenant document ID.")
+            logger.error("Tenant ID is required. This should be your Firestore tenant document ID.")
             return
         }
 
         if companyId.contains(" ") {
-            print("❌ [AppFig] Invalid company ID '\(companyId)' - IDs cannot contain spaces. Use the Firestore document ID.")
+            logger.error("Invalid company ID '\(companyId)' - IDs cannot contain spaces. Use the Firestore document ID.")
             return
         }
 
         if tenantId.contains(" ") {
-            print("❌ [AppFig] Invalid tenant ID '\(tenantId)' - IDs cannot contain spaces. Use the Firestore document ID.")
+            logger.error("Invalid tenant ID '\(tenantId)' - IDs cannot contain spaces. Use the Firestore document ID.")
             return
         }
 
         if companyId.count > 100 || tenantId.count > 100 {
-            print("⚠️ [AppFig] Unusually long ID detected. Are you using the correct Firestore document IDs?")
+            logger.warning("Unusually long ID detected. Are you using the correct Firestore document IDs?")
         }
 
         // Initialize
@@ -350,6 +354,7 @@ public class AppFig {
             self.useLocalMode = false
             self.onReadyCallback = onReady
             self.onRulesUpdatedCallback = onRulesUpdated
+            self.onErrorCallback = onError
 
             // Validate and set session timeout
             self.sessionTimeoutMs = sessionTimeoutMs
@@ -366,15 +371,15 @@ public class AppFig {
             self.maxEventAgeDays = min(max(maxEventAgeDays, 1), 365)
 
             if maxEvents != self.maxEvents {
-                print("⚠️ [AppFig] maxEvents \(maxEvents) out of range. Clamped to \(self.maxEvents)")
+                logger.warning("maxEvents \(maxEvents) out of range. Clamped to \(self.maxEvents)")
             }
 
             if maxEventAgeDays != self.maxEventAgeDays {
-                print("⚠️ [AppFig] maxEventAgeDays \(maxEventAgeDays) out of range. Clamped to \(self.maxEventAgeDays)")
+                logger.warning("maxEventAgeDays \(maxEventAgeDays) out of range. Clamped to \(self.maxEventAgeDays)")
             }
 
             if self.maxEvents > 10000 {
-                print("⚠️ [AppFig] Large event limit (\(self.maxEvents)) may impact memory and storage.")
+                logger.warning("Large event limit (\(self.maxEvents)) may impact memory and storage.")
             }
 
 
@@ -430,6 +435,7 @@ public class AppFig {
             self.localRulesJson = rulesJson
             self.onReadyCallback = onReady
             self.onRulesUpdatedCallback = onRulesUpdated
+            self.onErrorCallback = nil
 
             // Set sentinel values for cache keys in local mode
             self.companyId = "local"
@@ -445,7 +451,7 @@ public class AppFig {
             // Load cached events from disk (same as cloud mode)
             self.loadCachedEvents()
 
-            print("🏠 [AppFig] Initialized in LOCAL MODE")
+            logger.info("🏠 Initialized in LOCAL MODE")
 
             if let rulesJson = rulesJson {
                 self.parseAndApplyRules(rulesJson)
@@ -454,7 +460,7 @@ public class AppFig {
                     self.onReadyCallback?()
                 }
             } else {
-                print("⚠️ [AppFig] No rules provided for local mode. Features will return nil.")
+                logger.warning("No rules provided for local mode. Features will return nil.")
             }
 
             self.isInitialized = true
@@ -471,7 +477,7 @@ public class AppFig {
     ///   - parameters: Optional event parameters as key-value pairs
     public static func logEvent(name: String, parameters: [String: String]? = nil) {
         guard isInitialized else {
-            print("⚠️ [AppFig] AppFig not initialized. Call initialize() first.")
+            logger.warning("AppFig not initialized. Call initialize() first.")
             return
         }
 
@@ -484,7 +490,7 @@ public class AppFig {
             self.eventHistory.append(event)
             self.eventCounts[name, default: 0] += 1
 
-            print("📝 [AppFig] Event logged: '\(name)' (count: \(self.eventCounts[name] ?? 0), total events: \(self.eventHistory.count))")
+            logger.info("📝 Event logged: '\(name)' (count: \(self.eventCounts[name] ?? 0), total events: \(self.eventHistory.count))")
 
             // Trim old events
             self.trimEventHistory()
@@ -533,7 +539,7 @@ public class AppFig {
             self.trackUserPropertySchema(props: [key: value])
 
 
-            print("👤 [AppFig] User property set: \(key) = \(value)")
+            logger.info("👤 User property set: \(key) = \(value)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -551,7 +557,7 @@ public class AppFig {
             if let affectedFeatures = self.userPropertyToFeaturesIndex[key] {
             }
 
-            print("👤 [AppFig] User property removed: \(key)")
+            logger.info("👤 User property removed: \(key)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -573,7 +579,7 @@ public class AppFig {
             self.trackDevicePropertySchema(props: [key: value])
 
 
-            print("📱 [AppFig] Device property set: \(key) = \(value)")
+            logger.info("📱 Device property set: \(key) = \(value)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -589,7 +595,7 @@ public class AppFig {
             self.deviceProperties.removeValue(forKey: key)
 
 
-            print("📱 [AppFig] Device property removed: \(key)")
+            logger.info("📱 Device property removed: \(key)")
 
             // Immediately re-evaluate all features
             // Always re-evaluate, even during init (removed isInitialized check)
@@ -614,7 +620,7 @@ public class AppFig {
     @available(*, deprecated, message: "Country is now automatically detected from CDN response headers during rules fetch.")
     public static func detectAndSetCountry(completion: ((String?) -> Void)? = nil) {
         guard let url = URL(string: "https://rules-dev.appfig.com/rules_versions/country/country/dev/current/latest.json") else {
-            print("❌ [AppFig] Invalid country detection URL")
+            logger.error("Invalid country detection URL")
             completion?(nil)
             return
         }
@@ -656,7 +662,7 @@ public class AppFig {
     public static func getFeatureValue(_ feature: String) -> String? {
         return queue.sync {
             guard isInitialized else {
-                print("⚠️ [AppFig] AppFig not initialized. Call initialize() first.")
+                logger.warning("AppFig not initialized. Call initialize() first.")
                 return nil
             }
 
@@ -958,12 +964,12 @@ public class AppFig {
     /// Useful for implementing pull-to-refresh or manual update buttons
     public static func refreshRules() {
         guard !useLocalMode else {
-            print("⚠️ [AppFig] Cannot refresh in local mode")
+            logger.warning("Cannot refresh in local mode")
             return
         }
 
         guard isInitialized else {
-            print("⚠️ [AppFig] Cannot refresh: AppFig not initialized")
+            logger.warning("Cannot refresh: AppFig not initialized")
             return
         }
 
@@ -983,7 +989,7 @@ public class AppFig {
         defaults.removeObject(forKey: getCacheKey(companyId, tenantId, env, "Rules"))
         defaults.removeObject(forKey: getCacheKey(companyId, tenantId, env, "Hash"))
         defaults.removeObject(forKey: getCacheKey(companyId, tenantId, env, "Timestamp"))
-        print("🗑️ [AppFig] Cache cleared for \(companyId)/\(tenantId)/\(env)")
+        logger.info("🗑️ Cache cleared for \(companyId)/\(tenantId)/\(env)")
     }
 
     /// Clear event history
@@ -998,7 +1004,7 @@ public class AppFig {
             for (_, affectedFeatures) in self.eventToFeaturesIndex {
             }
 
-            print("🗑️ [AppFig] Event history cleared, re-evaluating all features")
+            logger.info("🗑️ Event history cleared, re-evaluating all features")
 
             // Immediately re-evaluate all features
             self.evaluateAllFeatures()
@@ -1093,7 +1099,7 @@ public class AppFig {
 
     private static func detectCountryFromCDN() {
         guard let url = URL(string: "https://rules-dev.appfig.com/rules_versions/country/country/dev/current/latest.json") else {
-            print("❌ [AppFig] Invalid standalone country detection URL")
+            logger.error("Invalid standalone country detection URL")
             return
         }
 
@@ -1103,7 +1109,7 @@ public class AppFig {
         let task = urlSession.dataTask(with: request) { _, response, _ in
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("⚠️ [AppFig] Invalid response from country detection endpoint")
+                logger.warning("Invalid response from country detection endpoint")
                 return
             }
 
@@ -1115,7 +1121,7 @@ public class AppFig {
                 } else {
                 }
             } else {
-                print("⚠️ [AppFig] Country detection endpoint returned HTTP \(httpResponse.statusCode)")
+                logger.warning("Country detection endpoint returned HTTP \(httpResponse.statusCode)")
             }
         }
 
@@ -1170,7 +1176,7 @@ public class AppFig {
         }
 
         guard let url = URL(string: pointerUrl) else {
-            print("❌ [AppFig] Invalid pointer URL")
+            logger.error("Invalid pointer URL")
             queue.async(flags: .barrier) { self.isFetchInProgress = false }
             completion?()
             return
@@ -1183,29 +1189,31 @@ public class AppFig {
 
         let task = urlSession.dataTask(with: request) { data, response, error in
             if let error = error {
-                print("❌ [AppFig] Failed to fetch pointer: \(error.localizedDescription)")
+                let errorMsg = "Failed to fetch pointer: \(error.localizedDescription)"
+                logger.error(errorMsg)
+                DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
             }
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ [AppFig] Invalid response from pointer URL")
+                logger.error("Invalid response from pointer URL")
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
             }
 
             guard httpResponse.statusCode == 200 else {
-                print("❌ [AppFig] Failed to fetch pointer: HTTP \(httpResponse.statusCode)")
-                print("❌ [AppFig] Verify your companyId ('\(AppFig.companyId)') and tenantId ('\(AppFig.tenantId)') are correct Firestore document IDs")
+                logger.error("Failed to fetch pointer: HTTP \(httpResponse.statusCode)")
+                logger.error("Verify your companyId ('\(AppFig.companyId)') and tenantId ('\(AppFig.tenantId)') are correct Firestore document IDs")
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
             }
 
             guard let data = data else {
-                print("❌ [AppFig] Empty response from pointer URL")
+                logger.error("Empty response from pointer URL")
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
                 return
@@ -1260,7 +1268,9 @@ public class AppFig {
                 }
 
             } catch {
-                print("❌ [AppFig] Failed to parse pointer JSON: \(error)")
+                let errorMsg = "Failed to parse pointer JSON: \(error)"
+                logger.error(errorMsg)
+                DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 queue.async(flags: .barrier) { self.isFetchInProgress = false }
                 completion?()
             }
@@ -1271,7 +1281,7 @@ public class AppFig {
 
     private static func fetchImmutableRules(immutableUrl: String, hash: String, completion: (() -> Void)? = nil) {
         guard let url = URL(string: immutableUrl) else {
-            print("❌ [AppFig] Invalid immutable URL")
+            logger.error("Invalid immutable URL")
             completion?()
             return
         }
@@ -1281,25 +1291,33 @@ public class AppFig {
 
         let task = urlSession.dataTask(with: request) { data, response, error in
             if let error = error {
-                print("❌ [AppFig] Failed to fetch immutable rules: \(error.localizedDescription)")
+                let errorMsg = "Failed to fetch immutable rules: \(error.localizedDescription)"
+                logger.error(errorMsg)
+                DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
             }
 
             guard let httpResponse = response as? HTTPURLResponse else {
-                print("❌ [AppFig] Invalid response from immutable URL")
+                let errorMsg = "Invalid response from immutable URL"
+                logger.error(errorMsg)
+                DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
             }
 
             guard httpResponse.statusCode == 200 else {
-                print("❌ [AppFig] Failed to fetch immutable rules: HTTP \(httpResponse.statusCode)")
+                let errorMsg = "Failed to fetch immutable rules: HTTP \(httpResponse.statusCode)"
+                logger.error(errorMsg)
+                DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
             }
 
             guard let data = data, let rulesJson = String(data: data, encoding: .utf8) else {
-                print("❌ [AppFig] Empty response from immutable URL")
+                let errorMsg = "Empty response from immutable URL"
+                logger.error(errorMsg)
+                DispatchQueue.main.async { self.onErrorCallback?(errorMsg) }
                 completion?()
                 return
             }
@@ -1328,7 +1346,7 @@ public class AppFig {
 
     private static func parseAndApplyRules(_ rulesJson: String, fireCallback: Bool = false) {
         guard let data = rulesJson.data(using: .utf8) else {
-            print("❌ [AppFig] Failed to convert rules JSON to data")
+            logger.error("Failed to convert rules JSON to data")
             return
         }
 
@@ -1367,7 +1385,7 @@ public class AppFig {
                 // Wrap the JSON in a features key and retry
                 let wrappedJson = "{\"features\": \(rulesJson)}"
                 guard let wrappedData = wrappedJson.data(using: .utf8) else {
-                    print("❌ [AppFig] Failed to create wrapped JSON")
+                    logger.error("Failed to create wrapped JSON")
                     return
                 }
 
@@ -1397,8 +1415,8 @@ public class AppFig {
 
 
             } catch {
-                print("❌ [AppFig] Failed to parse rules JSON in both formats: \(error)")
-                print("❌ [AppFig] Expected format: {\"features\": {\"feature_name\": [...rules]}}")
+                logger.error("Failed to parse rules JSON in both formats: \(error)")
+                logger.error("Expected format: {\"features\": {\"feature_name\": [...rules]}}")
             }
         }
     }
@@ -1910,7 +1928,7 @@ public class AppFig {
             if sequenceMatched {
                 return true
             } else {
-                print("[AppFig] ❌ Direct sequence failed starting at index \(startIdx), trying next position")
+                logger.warning("Direct sequence failed starting at index \(startIdx), trying next position")
             }
         }
 
@@ -2108,11 +2126,11 @@ public class AppFig {
                 let range = NSRange(actualStr.startIndex..., in: actualStr)
                 return regex.firstMatch(in: actualStr, options: [], range: range) != nil
             } catch {
-                print("[AppFig] ⚠️ Invalid regex pattern: \(expectedStr)")
+                logger.warning("Invalid regex pattern: \(expectedStr)")
                 return false
             }
         default:
-            print("[AppFig] ⚠️ Unknown operator: \(op)")
+            logger.warning("Unknown operator: \(op)")
             return false
         }
     }
@@ -2187,7 +2205,7 @@ public class AppFig {
             }
 
         } catch {
-            print("⚠️ [AppFig] Failed to load cached events: \(error)")
+            logger.warning("Failed to load cached events: \(error)")
         }
     }
 
@@ -2218,7 +2236,7 @@ public class AppFig {
     private static func saveCachedEvents() {
         // Validate we have company/tenant/env info (required for cache keys)
         if companyId.isEmpty || tenantId.isEmpty || env.isEmpty {
-            print("⚠️ [AppFig] Cannot save events: missing companyId/tenantId/env info")
+            logger.warning("Cannot save events: missing companyId/tenantId/env info")
             return
         }
 
@@ -2229,7 +2247,7 @@ public class AppFig {
             let data = try JSONEncoder().encode(eventHistory)
             defaults.set(data, forKey: eventsKey)
         } catch {
-            print("⚠️ [AppFig] Failed to save cached events: \(error)")
+            logger.warning("Failed to save cached events: \(error)")
         }
     }
 

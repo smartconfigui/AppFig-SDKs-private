@@ -154,6 +154,7 @@ export type AppFigInitParams = {
   maxEventAgeDays?: number; // max event age in days (default: 7, max: 365)
   onReady?: () => void; // callback fired when SDK is ready (once with cached rules, again with fresh rules)
   onRulesUpdated?: () => void; // callback fired when rules are updated from CDN
+  onError?: (error: string) => void; // callback fired on network or parsing errors
   // Legacy params (will be removed)
   userId?: string;
   rulesOverride?: Record<string, AppFigRule[]>;
@@ -203,6 +204,7 @@ class AppFigCore {
   // Callbacks and listeners
   private onReadyCallback?: () => void;
   private onRulesUpdatedCallback?: () => void;
+  private onErrorCallback?: (error: string) => void;
   private onVariantAssignedCallback?: (experimentKey: string, variantName: string) => void;
   private featureListeners: Map<string, Set<(featureName: string, value: any) => void>> = new Map();
   private features: Map<string, any> = new Map();
@@ -253,6 +255,7 @@ class AppFigCore {
     this.debugMode = params.debugMode ?? false;
     this.onReadyCallback = params.onReady;
     this.onRulesUpdatedCallback = params.onRulesUpdated;
+    this.onErrorCallback = params.onError;
 
     // Validate and set session timeout
     this.sessionTimeoutMs = params.sessionTimeoutMs ?? (30 * 60 * 1000); // 30 minutes default
@@ -841,7 +844,9 @@ class AppFigCore {
       // Fire onRulesUpdated callback AFTER all state is written
       this.onRulesUpdatedCallback?.();
     } catch (err) {
-      this.log('WARN', 'Failed to fetch remote rules – using cached version');
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      this.log('WARN', `Failed to fetch remote rules – using cached version: ${errorMsg}`);
+      this.onErrorCallback?.(errorMsg);
       if (Object.keys(this.rules).length > 0) {
       }
     } finally {

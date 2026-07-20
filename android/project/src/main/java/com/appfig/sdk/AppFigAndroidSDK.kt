@@ -280,6 +280,7 @@ object AppFig {
     // Callbacks and listeners
     private var onReadyCallback: (() -> Unit)? = null
     private var onRulesUpdatedCallback: (() -> Unit)? = null
+    private var onErrorCallback: ((String) -> Unit)? = null
     private val featureListeners = mutableMapOf<String, MutableSet<(String, String?) -> Unit>>()
     private const val SCHEMA_UPLOAD_INTERVAL_MS = 600000L // 10 minutes
     private const val SCHEMA_UPLOAD_THROTTLE_MS = 43200000L // 12 hours
@@ -348,7 +349,8 @@ object AppFig {
         maxEventsParam: Int = DEFAULT_MAX_EVENTS,
         maxEventAgeDaysParam: Int = DEFAULT_MAX_EVENT_AGE_DAYS,
         onReady: (() -> Unit)? = null,
-        onRulesUpdated: (() -> Unit)? = null
+        onRulesUpdated: (() -> Unit)? = null,
+        onError: ((String) -> Unit)? = null
     ) {
         val initStartTime = System.currentTimeMillis()
         log(AppFigLogLevel.INFO, "Initializing AppFig")
@@ -403,6 +405,7 @@ object AppFig {
         this.useLocalMode = false
         this.onReadyCallback = onReady
         this.onRulesUpdatedCallback = onRulesUpdated
+        this.onErrorCallback = onError
 
         // ============================================================
         // NOTE: We do NOT set isInitialized = true here anymore.
@@ -1425,13 +1428,17 @@ object AppFig {
                 val response = httpClient.newCall(request).execute()
 
                 if (!response.isSuccessful) {
-                    log(AppFigLogLevel.ERROR, "Unable to load rules")
+                    val errorMsg = "Failed to fetch pointer: HTTP ${response.code}"
+                    log(AppFigLogLevel.ERROR, errorMsg)
+                    mainHandler.post { onErrorCallback?.invoke(errorMsg) }
                     isFetchInProgress = false
                     return@execute
                 }
 
                 val pointerJson = response.body?.string() ?: run {
-                    log(AppFigLogLevel.ERROR, "Unable to load rules")
+                    val errorMsg = "Empty response from pointer URL"
+                    log(AppFigLogLevel.ERROR, errorMsg)
+                    mainHandler.post { onErrorCallback?.invoke(errorMsg) }
                     isFetchInProgress = false
                     return@execute
                 }
@@ -1481,7 +1488,9 @@ object AppFig {
                 fetchImmutableRules(immutableUrl, pointer.version, onComplete)
 
             } catch (e: Exception) {
-                log(AppFigLogLevel.ERROR, "Unable to load rules")
+                val errorMsg = "Failed to fetch pointer: ${e.message}"
+                log(AppFigLogLevel.ERROR, errorMsg)
+                mainHandler.post { onErrorCallback?.invoke(errorMsg) }
                 isFetchInProgress = false
                 mainHandler.post { onComplete?.invoke() }
             }
@@ -1501,12 +1510,16 @@ object AppFig {
             val response = httpClient.newCall(request).execute()
 
             if (!response.isSuccessful) {
-                log(AppFigLogLevel.WARN, "Failed to fetch remote rules – using cached version")
+                val errorMsg = "Failed to fetch immutable rules: HTTP ${response.code}"
+                log(AppFigLogLevel.WARN, errorMsg)
+                mainHandler.post { onErrorCallback?.invoke(errorMsg) }
                 return
             }
 
             val rulesJson = response.body?.string() ?: run {
-                log(AppFigLogLevel.WARN, "Failed to fetch remote rules – using cached version")
+                val errorMsg = "Empty response from immutable URL"
+                log(AppFigLogLevel.WARN, errorMsg)
+                mainHandler.post { onErrorCallback?.invoke(errorMsg) }
                 return
             }
 
@@ -1530,7 +1543,9 @@ object AppFig {
             }
 
         } catch (e: Exception) {
-            log(AppFigLogLevel.WARN, "Failed to fetch remote rules – using cached version")
+            val errorMsg = "Failed to fetch immutable rules: ${e.message}"
+            log(AppFigLogLevel.WARN, errorMsg)
+            mainHandler.post { onErrorCallback?.invoke(errorMsg) }
             mainHandler.post { onComplete?.invoke() }
         }
     }
