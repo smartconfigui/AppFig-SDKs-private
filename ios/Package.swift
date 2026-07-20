@@ -2,19 +2,19 @@
 import PackageDescription
 
 let package = Package(
-    name: "AppFig",
+    name: "AppFigSDK",
     platforms: [
         .iOS(.v12)
     ],
     products: [
         .library(
-            name: "AppFig",
-            targets: ["AppFig"]
+            name: "AppFigSDK",
+            targets: ["AppFigSDK"]
         )
     ],
     targets: [
         .target(
-            name: "AppFig",
+            name: "AppFigSDK",
             dependencies: [],
             path: "AppFig/AppFig",
             sources: ["."],
