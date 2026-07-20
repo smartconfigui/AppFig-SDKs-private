@@ -46,7 +46,7 @@ public class AppFig {
     // MARK: - Analytics Provider Protocol & Implementations
 
     /// Analytics Provider Protocol for forwarding A/B test assignments
-    public protocol AnalyticsProvider {
+    public protocol AnalyticsProvider: AnyObject {
         /// Set a user property in the analytics provider
         /// - Parameter key: Property name (e.g., "appfig_experiments")
         /// - Parameter value: Property value (e.g., "exp1:variant1|exp2:variant2")
