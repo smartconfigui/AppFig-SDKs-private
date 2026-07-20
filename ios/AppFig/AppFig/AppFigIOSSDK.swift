@@ -39,93 +39,95 @@
 import Foundation
 import UIKit
 
+// MARK: - Analytics Provider Protocol & Implementations (Top-Level)
+
+/// Analytics Provider Protocol for forwarding A/B test assignments
+public protocol AppFigAnalyticsProvider: AnyObject {
+    /// Set a user property in the analytics provider
+    /// - Parameter key: Property name (e.g., "appfig_experiments")
+    /// - Parameter value: Property value (e.g., "exp1:variant1|exp2:variant2")
+    func setUserProperty(key: String, value: String)
+}
+
+/// Amplitude Analytics Provider for iOS.
+/// Expects an instance responding to setUserProperties: (e.g. Amplitude.instance()).
+public class AppFigAnalyticsAmplitudeProvider: AppFigAnalyticsProvider {
+    private let amplitude: NSObject
+    private let selector = NSSelectorFromString("setUserProperties:")
+
+    public init(amplitude: NSObject) {
+        self.amplitude = amplitude
+        if !amplitude.responds(to: selector) {
+            print("[AppFig] Amplitude instance does not respond to setUserProperties:")
+        }
+    }
+
+    public func setUserProperty(key: String, value: String) {
+        guard amplitude.responds(to: selector) else { return }
+        _ = amplitude.perform(selector, with: [key: value] as NSDictionary)
+    }
+}
+
+/// Firebase Analytics Provider for iOS.
+/// Expects an instance responding to setUserProperty:forName:
+/// (Firebase's Analytics API is class-based; pass a thin NSObject wrapper,
+/// or use a custom AppFigAnalyticsProvider that calls Analytics.setUserProperty directly).
+public class AppFigAnalyticsFirebaseProvider: AppFigAnalyticsProvider {
+    private let firebase: NSObject
+    private let selector = NSSelectorFromString("setUserProperty:forName:")
+
+    public init(firebase: NSObject) {
+        self.firebase = firebase
+        if !firebase.responds(to: selector) {
+            print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
+        }
+    }
+
+    public func setUserProperty(key: String, value: String) {
+        guard firebase.responds(to: selector) else { return }
+        _ = firebase.perform(selector, with: value as NSString, with: key as NSString)
+    }
+}
+
+/// Mixpanel Analytics Provider for iOS.
+/// Expects an instance whose `people` object responds to set:
+/// (e.g. Mixpanel.mainInstance()).
+public class AppFigAnalyticsMixpanelProvider: AppFigAnalyticsProvider {
+    private let people: NSObject?
+    private let setSelector = NSSelectorFromString("set:")
+
+    public init(mixpanel: NSObject) {
+        let peopleSelector = NSSelectorFromString("people")
+        if mixpanel.responds(to: peopleSelector),
+           let peopleObject = mixpanel.perform(peopleSelector)?.takeUnretainedValue() as? NSObject {
+            people = peopleObject
+        } else {
+            people = nil
+            print("[AppFig] Mixpanel instance does not expose people")
+        }
+    }
+
+    public func setUserProperty(key: String, value: String) {
+        guard let people = people, people.responds(to: setSelector) else { return }
+        _ = people.perform(setSelector, with: [key: value] as NSDictionary)
+    }
+}
+
+/// Null Analytics Provider for iOS
+/// No-op implementation used when no provider is registered
+public class AppFigAnalyticsNullProvider: AppFigAnalyticsProvider {
+    public init() {}
+
+    public func setUserProperty(key: String, value: String) {
+        // No-op
+    }
+}
+
+// MARK: - Main AppFig SDK Class
+
 /// Main AppFig SDK class
 /// Thread-safe static class for managing feature flags and remote configuration
 public class AppFig {
-
-    // MARK: - Analytics Provider Protocol & Implementations
-
-    /// Analytics Provider Protocol for forwarding A/B test assignments
-    public protocol AnalyticsProvider: AnyObject {
-        /// Set a user property in the analytics provider
-        /// - Parameter key: Property name (e.g., "appfig_experiments")
-        /// - Parameter value: Property value (e.g., "exp1:variant1|exp2:variant2")
-        func setUserProperty(key: String, value: String)
-    }
-
-    /// Amplitude Analytics Provider for iOS.
-    /// Expects an instance responding to setUserProperties: (e.g. Amplitude.instance()).
-    public class AmplitudeProvider: AnalyticsProvider {
-        private let amplitude: NSObject
-        private let selector = NSSelectorFromString("setUserProperties:")
-
-        public init(amplitude: NSObject) {
-            self.amplitude = amplitude
-            if !amplitude.responds(to: selector) {
-                print("[AppFig] Amplitude instance does not respond to setUserProperties:")
-            }
-        }
-
-        public func setUserProperty(key: String, value: String) {
-            guard amplitude.responds(to: selector) else { return }
-            _ = amplitude.perform(selector, with: [key: value] as NSDictionary)
-        }
-    }
-
-    /// Firebase Analytics Provider for iOS.
-    /// Expects an instance responding to setUserProperty:forName:
-    /// (Firebase's Analytics API is class-based; pass a thin NSObject wrapper,
-    /// or use a custom AnalyticsProvider that calls Analytics.setUserProperty directly).
-    public class FirebaseProvider: AnalyticsProvider {
-        private let firebase: NSObject
-        private let selector = NSSelectorFromString("setUserProperty:forName:")
-
-        public init(firebase: NSObject) {
-            self.firebase = firebase
-            if !firebase.responds(to: selector) {
-                print("[AppFig] Firebase instance does not respond to setUserProperty:forName:")
-            }
-        }
-
-        public func setUserProperty(key: String, value: String) {
-            guard firebase.responds(to: selector) else { return }
-            _ = firebase.perform(selector, with: value as NSString, with: key as NSString)
-        }
-    }
-
-    /// Mixpanel Analytics Provider for iOS.
-    /// Expects an instance whose `people` object responds to set:
-    /// (e.g. Mixpanel.mainInstance()).
-    public class MixpanelProvider: AnalyticsProvider {
-        private let people: NSObject?
-        private let setSelector = NSSelectorFromString("set:")
-
-        public init(mixpanel: NSObject) {
-            let peopleSelector = NSSelectorFromString("people")
-            if mixpanel.responds(to: peopleSelector),
-               let peopleObject = mixpanel.perform(peopleSelector)?.takeUnretainedValue() as? NSObject {
-                people = peopleObject
-            } else {
-                people = nil
-                print("[AppFig] Mixpanel instance does not expose people")
-            }
-        }
-
-        public func setUserProperty(key: String, value: String) {
-            guard let people = people, people.responds(to: setSelector) else { return }
-            _ = people.perform(setSelector, with: [key: value] as NSDictionary)
-        }
-    }
-
-    /// Null Analytics Provider for iOS
-    /// No-op implementation used when no provider is registered
-    public class NullAnalyticsProvider: AnalyticsProvider {
-        public init() {}
-
-        public func setUserProperty(key: String, value: String) {
-            // No-op
-        }
-    }
 
     // MARK: - Constants
 
@@ -225,7 +227,7 @@ public class AppFig {
     private static var userId: String? = nil
 
     // Analytics integration
-    private static var analyticsProviders: [AnalyticsProvider] = []
+    private static var analyticsProviders: [AppFigAnalyticsProvider] = []
     private static var activeExperiments: [String: String] = [:] // experimentKey -> variantName
     private static var lastSyncedExperiments: String = "" // last value sent to the analytics providers
     private static var rulesExperimentKeys: Set<String> = [] // experiment keys in current rules (rebuilt in buildIndexes)
@@ -743,7 +745,7 @@ public class AppFig {
     /// Register an analytics provider for tracking variant assignments
     ///
     /// - Parameter provider: Analytics provider implementation
-    public static func registerAnalyticsProvider(_ provider: AnalyticsProvider) {
+    public static func registerAnalyticsProvider(_ provider: AppFigAnalyticsProvider) {
         queue.async(flags: .barrier) {
             analyticsProviders.append(provider)
             log(.info, "Analytics provider registered")
@@ -756,7 +758,7 @@ public class AppFig {
     /// Unregister an analytics provider
     ///
     /// - Parameter provider: Analytics provider implementation to remove
-    public static func unregisterAnalyticsProvider(_ provider: AnalyticsProvider) {
+    public static func unregisterAnalyticsProvider(_ provider: AppFigAnalyticsProvider) {
         queue.async(flags: .barrier) {
             analyticsProviders.removeAll { $0 === provider }
             log(.info, "Analytics provider unregistered")
