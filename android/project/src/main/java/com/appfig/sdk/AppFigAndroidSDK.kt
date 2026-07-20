@@ -1692,7 +1692,8 @@ object AppFig {
         if (hasValidABTest(rule)) {
             return selectVariant(userId, rule.ab_test!!.experiment_key, rule.ab_test.variants)
         }
-        return formatValue(rule.value) ?: "on"
+        val formatted = formatValue(rule.value)
+        return formatted?.toString() ?: "on"
     }
 
     /**
@@ -2021,7 +2022,8 @@ object AppFig {
                 val hasMatchingEvent = matchingEvents.any { event ->
                     condition.param.all { (paramKey, opValue) ->
                         val eventValue = event.parameters[paramKey]
-                        eventValue != null && compareValue(eventValue, opValue.operator, formatValue(opValue.value))
+                        val expectedValue = formatValue(opValue.value)
+                        eventValue != null && expectedValue != null && compareValue(eventValue, opValue.operator, expectedValue)
                     }
                 }
                 if (!hasMatchingEvent) {
@@ -2223,7 +2225,8 @@ object AppFig {
 
         return step.param.all { (paramKey, opValue) ->
             val actualValue = event.parameters[paramKey]
-            actualValue != null && compareValue(actualValue, opValue.operator, formatValue(opValue.value))
+            val expectedValue = formatValue(opValue.value)
+            actualValue != null && expectedValue != null && compareValue(actualValue, opValue.operator, expectedValue)
         }
     }
 
