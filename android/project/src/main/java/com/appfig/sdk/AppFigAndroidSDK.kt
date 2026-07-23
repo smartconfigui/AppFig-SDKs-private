@@ -1080,6 +1080,10 @@ object AppFig {
         val now = System.currentTimeMillis()
         val msSinceActivity = now - lastActivity
 
+        // Update lastActivity immediately to prevent infinite recursion
+        // (logEvent calls updateActivity, which would see the old lastActivity and recurse)
+        lastActivity = now
+
         if (msSinceActivity > sessionTimeoutMs) {
             // Session expired, log session_end
             if (sessionActive) {
@@ -1091,8 +1095,6 @@ object AppFig {
             logEvent("session_start")
             sessionActive = true
         }
-
-        lastActivity = now
     }
 
     // ==================================================================================
